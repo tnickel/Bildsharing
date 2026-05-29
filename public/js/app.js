@@ -239,6 +239,7 @@ function setupDashboardView() {
 
   showSection('dashboard');
   loadSessions();
+  updateUploadPulses();
 }
 
 // --- AUTHENTICATION FLOWS ---
@@ -636,16 +637,23 @@ if (uploadCancelBtn) {
 }
 
 function updateUploadPulses() {
-  if (selectedFiles.length > 0) {
-    if (uploadTitleInput.value.trim() === '') {
-      uploadTitleInput.classList.add('pulse-input-highlight');
-    } else {
-      uploadTitleInput.classList.remove('pulse-input-highlight');
-    }
-    uploadSubmitBtn.classList.add('pulse-button-highlight');
+  const isTitleEmpty = uploadTitleInput.value.trim() === '';
+  const hasFiles = selectedFiles.length > 0;
+
+  // Reset all highlights
+  uploadTitleInput.classList.remove('pulse-input-highlight');
+  if (dropzone) dropzone.classList.remove('pulse-dropzone-highlight');
+  uploadSubmitBtn.classList.remove('pulse-button-highlight');
+
+  if (isTitleEmpty) {
+    // Step 1: Tell user to input their name
+    uploadTitleInput.classList.add('pulse-input-highlight');
+  } else if (!hasFiles) {
+    // Step 2: Name is entered, tell user to select files
+    if (dropzone) dropzone.classList.add('pulse-dropzone-highlight');
   } else {
-    uploadTitleInput.classList.remove('pulse-input-highlight');
-    uploadSubmitBtn.classList.remove('pulse-button-highlight');
+    // Step 3: Both done, tell user to publish
+    uploadSubmitBtn.classList.add('pulse-button-highlight');
   }
 }
 

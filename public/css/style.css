@@ -2086,18 +2086,44 @@ input[type="password"]:focus,
 
 @keyframes buttonPulseGlow {
   0% {
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+    transform: scale(1);
   }
-  70% {
-    box-shadow: 0 0 0 12px rgba(16, 185, 129, 0);
+  50% {
+    box-shadow: 0 0 25px rgba(16, 185, 129, 0.85);
+    transform: scale(1.025);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+    transform: scale(1);
+  }
+}
+
+@keyframes dropzonePulseGlow {
+  0% {
+    border-color: rgba(16, 185, 129, 0.35);
+    box-shadow: 0 0 5px rgba(16, 185, 129, 0.15);
+    background: rgba(240, 253, 244, 0.05);
+  }
+  50% {
+    border-color: var(--accent-green);
+    box-shadow: 0 0 25px rgba(16, 185, 129, 0.5);
+    background: rgba(16, 185, 129, 0.12);
+  }
+  100% {
+    border-color: rgba(16, 185, 129, 0.35);
+    box-shadow: 0 0 5px rgba(16, 185, 129, 0.15);
+    background: rgba(240, 253, 244, 0.05);
   }
 }
 
 .pulse-input-highlight {
   animation: inputPulseGlow 2s infinite ease-in-out;
+}
+
+.pulse-dropzone-highlight {
+  animation: dropzonePulseGlow 2.2s infinite ease-in-out;
+  border-style: dashed !important;
 }
 
 .pulse-button-highlight {
