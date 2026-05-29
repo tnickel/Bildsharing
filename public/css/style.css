@@ -2217,10 +2217,11 @@ input[type="password"]:focus,
 
 /* --- SUBTLE LOGIN CARD BLOG LINK --- */
 .auth-blog-link {
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-  opacity: 0.85;
-  text-decoration: underline rgba(245, 158, 11, 0.35); /* Sunset Amber underline */
+  color: #34d399; /* Highly readable emerald green */
+  font-size: 0.85rem;
+  font-weight: 500;
+  opacity: 0.95;
+  text-decoration: underline rgba(52, 211, 153, 0.35); /* Subtle emerald underline */
   transition: all var(--transition-fast);
   display: inline-block;
   margin-top: 8px;
@@ -2228,8 +2229,8 @@ input[type="password"]:focus,
 
 .auth-blog-link:hover {
   opacity: 1;
-  color: var(--accent-purple);
-  text-decoration-color: var(--accent-purple);
+  color: #a7f3d0; /* Soft mint green on hover */
+  text-decoration-color: #a7f3d0;
 }
 
 /* --- SEGMENTED HEADER SLIDESHOW CONTROLS --- */
