@@ -1,4 +1,6 @@
-# Bildsharing Plattform
+# ZenShare - Bildsharing Plattform
+
+![ZenShare Banner](public/images/zenshare_preview.png)
 
 Eine komfortable, sichere und ästhetisch ansprechende Weboberfläche zum Hochladen, Teilen und Herunterladen von Bildern und ZIP-Archiven. 
 
