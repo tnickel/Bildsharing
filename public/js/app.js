@@ -1,6 +1,8 @@
 // --- STATE MANAGEMENT ---
 let currentUser = null;
 let selectedFiles = [];
+let activeDownloadXhr = null;
+let allSessions = [];
 
 // --- DOM ELEMENTS ---
 const sections = {
@@ -41,6 +43,7 @@ const uploadSuccess = document.getElementById('upload-success');
 
 // Sessions Elements
 const refreshSessionsBtn = document.getElementById('refresh-sessions-btn');
+const downloadAllBtn = document.getElementById('download-all-btn');
 const sessionsLoading = document.getElementById('sessions-loading');
 const sessionsEmpty = document.getElementById('sessions-empty');
 const sessionsAccordion = document.getElementById('sessions-accordion');
@@ -67,6 +70,7 @@ const lightboxCaption = document.getElementById('lightbox-caption');
 const lightboxCloseBtn = document.getElementById('lightbox-close-btn');
 const lightboxPrevBtn = document.getElementById('lightbox-prev-btn');
 const lightboxNextBtn = document.getElementById('lightbox-next-btn');
+const lightboxDeleteBtn = document.getElementById('lightbox-delete-btn');
 
 // Download Toast Elements
 const downloadToast = document.getElementById('download-toast');
@@ -74,6 +78,8 @@ const downloadToastTitle = document.getElementById('download-toast-title');
 const downloadToastBar = document.getElementById('download-toast-bar');
 const downloadToastPercent = document.getElementById('download-toast-percent');
 const downloadToastText = document.getElementById('download-toast-text');
+const downloadToastCancelBtn = document.getElementById('download-toast-cancel-btn');
+const downloadToastBtnAbort = document.getElementById('download-toast-btn-abort');
 
 // Lightbox State
 let lightboxImagesList = [];
@@ -103,18 +109,26 @@ function formatBytes(bytes, decimals = 2) {
 }
 
 // Download file with progress tracking
-function downloadFileWithProgress(url, method, body, filename, toastTitle) {
+function downloadFileWithProgress(url, method, body, filename, toastTitle, totalSize = 0) {
+  // If there's an active download, abort it first
+  if (activeDownloadXhr) {
+    try { activeDownloadXhr.abort(); } catch (err) {}
+    activeDownloadXhr = null;
+  }
+
   // Reset toast UI
   downloadToastTitle.textContent = toastTitle;
-  downloadToastBar.style.width = '0%';
-  downloadToastPercent.textContent = '0%';
+  downloadToastBar.style.width = '100%';
+  downloadToastPercent.textContent = '...';
   downloadToastText.textContent = 'Bereite ZIP-Datei vor...';
+  downloadToastBar.classList.add('indeterminate');
   
   // Show toast
   downloadToast.classList.remove('hidden');
   downloadToast.classList.remove('fade-out');
 
   const xhr = new XMLHttpRequest();
+  activeDownloadXhr = xhr;
   xhr.open(method, url, true);
   xhr.responseType = 'blob';
 
@@ -124,13 +138,15 @@ function downloadFileWithProgress(url, method, body, filename, toastTitle) {
 
   // Monitor download progress
   xhr.addEventListener('progress', (e) => {
-    if (e.lengthComputable && e.total > 0) {
-      const percent = Math.round((e.loaded / e.total) * 100);
+    let total = e.lengthComputable && e.total > 0 ? e.total : totalSize;
+    if (total > 0) {
+      downloadToastBar.classList.remove('indeterminate');
+      const percent = Math.min(Math.round((e.loaded / total) * 100), 99);
       downloadToastBar.style.width = percent + '%';
       downloadToastPercent.textContent = percent + '%';
-      downloadToastText.textContent = `Lade herunter: ${formatBytes(e.loaded)} von ${formatBytes(e.total)}`;
+      downloadToastText.textContent = `Lade herunter: ${formatBytes(e.loaded)} von ${formatBytes(total)}`;
     } else {
-      downloadToastBar.style.width = '100%';
+      downloadToastBar.classList.add('indeterminate');
       downloadToastPercent.textContent = '...';
       downloadToastText.textContent = `Lade herunter... (${formatBytes(e.loaded)})`;
     }
@@ -138,6 +154,7 @@ function downloadFileWithProgress(url, method, body, filename, toastTitle) {
 
   // Load completion
   xhr.addEventListener('load', () => {
+    activeDownloadXhr = null;
     if (xhr.status >= 200 && xhr.status < 300) {
       const blob = xhr.response;
       const downloadUrl = URL.createObjectURL(blob);
@@ -151,6 +168,7 @@ function downloadFileWithProgress(url, method, body, filename, toastTitle) {
       URL.revokeObjectURL(downloadUrl);
 
       // Show success
+      downloadToastBar.classList.remove('indeterminate');
       downloadToastBar.style.width = '100%';
       downloadToastPercent.textContent = '100%';
       downloadToastText.textContent = 'Heruntergeladen!';
@@ -162,16 +180,19 @@ function downloadFileWithProgress(url, method, body, filename, toastTitle) {
         }, 300);
       }, 2000);
     } else {
+      downloadToastBar.classList.remove('indeterminate');
       handleDownloadError(xhr);
     }
   });
 
   // Handle errors
   xhr.addEventListener('error', () => {
+    activeDownloadXhr = null;
     showToastError('Netzwerkfehler beim Download.');
   });
 
   xhr.addEventListener('abort', () => {
+    activeDownloadXhr = null;
     showToastError('Download abgebrochen.');
   });
 
@@ -196,6 +217,7 @@ function handleDownloadError(xhr) {
 }
 
 function showToastError(msg) {
+  downloadToastBar.classList.remove('indeterminate');
   downloadToastBar.style.width = '0%';
   downloadToastPercent.textContent = 'Fehler';
   downloadToastText.textContent = msg;
@@ -738,7 +760,7 @@ uploadForm.addEventListener('submit', async (e) => {
     } else {
       let errorMsg = 'Fehler beim Upload.';
       if (xhr.status === 413) {
-        errorMsg = 'Die hochgeladenen Dateien sind zu groß (Maximal 500 MB).';
+        errorMsg = 'Die hochgeladenen Dateien sind zu groß (Maximal 2 GB).';
       } else if (xhr.status === 429) {
         errorMsg = 'Limit überschritten. Sie können maximal 10 Bilder pro Stunde hochladen.';
       } else {
@@ -780,15 +802,51 @@ uploadForm.addEventListener('submit', async (e) => {
 
 refreshSessionsBtn.addEventListener('click', loadSessions);
 
+if (downloadAllBtn) {
+  downloadAllBtn.addEventListener('click', () => {
+    let totalSize = 0;
+    allSessions.forEach(session => {
+      if (session.files && Array.isArray(session.files)) {
+        session.files.forEach(f => {
+          totalSize += (f.size || 0);
+        });
+      }
+    });
+
+    downloadFileWithProgress(
+      '/api/sessions/download-all',
+      'GET',
+      null,
+      'alle-bildergalerien.zip',
+      'Alle Bildergalerien',
+      totalSize
+    );
+  });
+}
+
+function updateDownloadAllButtonState() {
+  if (!downloadAllBtn) return;
+  const cards = sessionsAccordion.querySelectorAll('.session-card');
+  if (cards.length === 0) {
+    downloadAllBtn.classList.add('hidden');
+  } else {
+    downloadAllBtn.classList.remove('hidden');
+  }
+}
+
 async function loadSessions() {
   sessionsLoading.classList.remove('hidden');
   sessionsAccordion.classList.add('hidden');
   sessionsEmpty.classList.add('hidden');
+  if (downloadAllBtn) {
+    downloadAllBtn.classList.add('hidden');
+  }
 
   try {
     const res = await fetch('/api/sessions');
     if (!res.ok) throw new Error('Sessions konnten nicht geladen werden.');
     const sessions = await res.json();
+    allSessions = sessions;
 
     sessionsLoading.classList.add('hidden');
 
@@ -804,11 +862,15 @@ async function loadSessions() {
     });
 
     sessionsAccordion.classList.remove('hidden');
+    updateDownloadAllButtonState();
 
   } catch (err) {
     sessionsLoading.classList.add('hidden');
     sessionsAccordion.innerHTML = `<div class="alert alert-danger" style="margin-top:0;">${err.message}</div>`;
     sessionsAccordion.classList.remove('hidden');
+    if (downloadAllBtn) {
+      downloadAllBtn.classList.add('hidden');
+    }
   }
 }
 
@@ -857,7 +919,7 @@ function createSessionCard(session) {
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><line x1="9" x2="9" y1="21" y2="9"/></svg>
             <span>${formattedDate}</span>
           </div>
-          <div class="session-meta-item">
+          <div class="session-meta-item file-count-meta">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
             <span>${fileCount} ${fileCount === 1 ? 'Bild' : 'Bilder'} (${formattedSize})</span>
           </div>
@@ -1007,7 +1069,8 @@ function createSessionCard(session) {
       .replace(/-+/g, '-')
       .trim();
     const filename = `${safeTitle || 'images'}.zip`;
-    downloadFileWithProgress(`/api/sessions/${session.id}/download`, 'GET', null, filename, 'Session ZIP herunterladen');
+    const totalSize = session.files.reduce((acc, f) => acc + (f.size || 0), 0);
+    downloadFileWithProgress(`/api/sessions/${session.id}/download`, 'GET', null, filename, 'Session ZIP herunterladen', totalSize);
   });
 
   // Action: Download Selected ZIP
@@ -1024,35 +1087,45 @@ function createSessionCard(session) {
       .trim();
     const filename = `${safeTitle || 'selection'}.zip`;
 
+    const totalSize = session.files
+      .filter(f => filenamesArray.includes(f.filename))
+      .reduce((acc, f) => acc + (f.size || 0), 0);
+
     downloadFileWithProgress(
       `/api/sessions/${session.id}/download-selected`, 
       'POST', 
       { filenames: filenamesArray }, 
       filename, 
-      'Auswahl ZIP herunterladen'
+      'Auswahl ZIP herunterladen',
+      totalSize
     );
   });
 
-  // Action: Delete Session
+  // Action: Delete Session (Double safety confirmation)
   if (showDelete) {
     card.querySelector('.delete-session-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (confirm('Möchten Sie diese Session und alle darin enthaltenen Bilder wirklich unwiderruflich löschen?')) {
-        try {
-          const res = await fetch(`/api/sessions/${session.id}`, {
-            method: 'DELETE'
-          });
-          if (!res.ok) {
-            const data = await res.json();
-            throw new Error(data.error || 'Fehler beim Löschen.');
+      const firstConfirm = confirm('Möchten Sie diese Session und alle darin enthaltenen Bilder wirklich unwiderruflich löschen?');
+      if (firstConfirm) {
+        const secondConfirm = confirm('WARNUNG: Alle Bilder dieser Galerie gehen unwiderruflich verloren. Möchten Sie wirklich fortfahren?');
+        if (secondConfirm) {
+          try {
+            const res = await fetch(`/api/sessions/${session.id}`, {
+              method: 'DELETE'
+            });
+            if (!res.ok) {
+              const data = await res.json();
+              throw new Error(data.error || 'Fehler beim Löschen.');
+            }
+            card.remove();
+            // Check if accordion is now empty
+            if (sessionsAccordion.children.length === 0) {
+              sessionsEmpty.classList.remove('hidden');
+            }
+            updateDownloadAllButtonState();
+          } catch (err) {
+            alert(err.message);
           }
-          card.remove();
-          // Check if accordion is now empty
-          if (sessionsAccordion.children.length === 0) {
-            sessionsEmpty.classList.remove('hidden');
-          }
-        } catch (err) {
-          alert(err.message);
         }
       }
     });
@@ -1068,10 +1141,17 @@ function renderGalleryImages(cardElement, session) {
   const downloadZipBtn = cardElement.querySelector('.download-zip-btn');
   const downloadSelectedBtn = cardElement.querySelector('.download-selected-btn');
 
+  const isOwner = session.uploadedBy.toLowerCase() === currentUser.username.toLowerCase();
+  const isAdmin = currentUser.role === 'admin';
+  const showDelete = isOwner || isAdmin;
+
   // Load all images paths in an array for lightbox reference
   const sessionImages = session.files.map(f => ({
     url: `/uploads/${session.id}/${encodeURIComponent(f.filename)}`,
-    title: f.filename
+    title: f.filename,
+    sessionId: session.id,
+    filename: f.filename,
+    showDelete: showDelete
   }));
 
   session.files.forEach((file, index) => {
@@ -1090,6 +1170,11 @@ function renderGalleryImages(cardElement, session) {
         <a href="${imgUrl}" download="${escapeHtml(file.filename)}" class="thumb-download-btn" title="Bild herunterladen">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
         </a>
+        ${showDelete ? `
+          <button class="thumb-delete-btn" title="Bild löschen">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+          </button>
+        ` : ''}
       </div>
     `;
 
@@ -1129,10 +1214,51 @@ function renderGalleryImages(cardElement, session) {
       e.stopPropagation();
     });
 
+    // Handle Delete single image on thumbnail hover btn
+    if (showDelete) {
+      const deleteBtn = thumbContainer.querySelector('.thumb-delete-btn');
+      deleteBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        if (confirm(`Möchten Sie das Bild "${file.filename}" wirklich löschen?`)) {
+          try {
+            const res = await fetch(`/api/sessions/${session.id}/files/${encodeURIComponent(file.filename)}`, {
+              method: 'DELETE'
+            });
+            if (!res.ok) {
+              const data = await res.json();
+              throw new Error(data.error || 'Fehler beim Löschen des Bildes.');
+            }
+
+            // Remove from local data model
+            const fileIdx = session.files.findIndex(f => f.filename === file.filename);
+            if (fileIdx !== -1) {
+              session.files.splice(fileIdx, 1);
+            }
+
+            // Remove selection state if selected
+            cardElement.selectedFilenames.delete(file.filename);
+
+            // Re-render gallery images (updates offsets, indexes, elements)
+            renderGalleryImages(cardElement, session);
+
+            // Update counts in header
+            const metaItem = cardElement.querySelector('.session-meta-item.file-count-meta span');
+            if (metaItem) {
+              const newTotalSize = session.files.reduce((acc, f) => acc + (f.size || 0), 0);
+              const newFileCount = session.files.length;
+              metaItem.textContent = `${newFileCount} ${newFileCount === 1 ? 'Bild' : 'Bilder'} (${formatBytes(newTotalSize)})`;
+            }
+          } catch (err) {
+            alert(err.message);
+          }
+        }
+      });
+    }
+
     // Click on image container to open premium fullscreen lightbox
     thumbContainer.addEventListener('click', (e) => {
       // If clicking checkbox/downloads overlay, do not open lightbox
-      if (e.target.closest('.thumb-checkbox-container') || e.target.closest('.thumb-download-btn')) {
+      if (e.target.closest('.thumb-checkbox-container') || e.target.closest('.thumb-download-btn') || e.target.closest('.thumb-delete-btn')) {
         return;
       }
       openLightbox(sessionImages, index);
@@ -1173,6 +1299,14 @@ function loadLightboxImage() {
   setTimeout(() => {
     lightboxImg.src = imgData.url;
     lightboxCaption.textContent = `${lightboxCurrentIndex + 1} / ${lightboxImagesList.length} - ${imgData.title}`;
+    
+    // Toggle delete button visibility based on auth
+    if (imgData.showDelete) {
+      lightboxDeleteBtn.classList.remove('hidden');
+    } else {
+      lightboxDeleteBtn.classList.add('hidden');
+    }
+    
     lightboxImg.style.opacity = '1';
   }, 150);
 }
@@ -1191,6 +1325,80 @@ function showPrevImage() {
 
 // Close on close button click
 lightboxCloseBtn.addEventListener('click', closeLightbox);
+
+// Cancel active download
+if (downloadToastCancelBtn) {
+  downloadToastCancelBtn.addEventListener('click', () => {
+    if (activeDownloadXhr) {
+      activeDownloadXhr.abort();
+    }
+  });
+}
+
+if (downloadToastBtnAbort) {
+  downloadToastBtnAbort.addEventListener('click', () => {
+    if (activeDownloadXhr) {
+      activeDownloadXhr.abort();
+    }
+  });
+}
+
+// Action: Delete single image from within the Lightbox
+if (lightboxDeleteBtn) {
+  lightboxDeleteBtn.addEventListener('click', async () => {
+    if (lightboxCurrentIndex < 0 || lightboxCurrentIndex >= lightboxImagesList.length) return;
+    const imgData = lightboxImagesList[lightboxCurrentIndex];
+    
+    if (confirm(`Möchten Sie das Bild "${imgData.filename}" wirklich unwiderruflich löschen?`)) {
+      try {
+        const res = await fetch(`/api/sessions/${imgData.sessionId}/files/${encodeURIComponent(imgData.filename)}`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || 'Fehler beim Löschen des Bildes.');
+        }
+        
+        // Remove from global allSessions and update local DOM card
+        const session = allSessions.find(s => s.id === imgData.sessionId);
+        if (session) {
+          const fileIdx = session.files.findIndex(f => f.filename === imgData.filename);
+          if (fileIdx !== -1) {
+            session.files.splice(fileIdx, 1);
+          }
+          
+          const cardElement = document.querySelector(`.session-card[data-id="${imgData.sessionId}"]`);
+          if (cardElement) {
+            // Remove selection state if selected
+            cardElement.selectedFilenames.delete(imgData.filename);
+            
+            // Re-render gallery card in dashboard
+            renderGalleryImages(cardElement, session);
+            
+            // Update counts in header
+            const metaItem = cardElement.querySelector('.session-meta-item.file-count-meta span');
+            if (metaItem) {
+              const newTotalSize = session.files.reduce((acc, f) => acc + (f.size || 0), 0);
+              const newFileCount = session.files.length;
+              metaItem.textContent = `${newFileCount} ${newFileCount === 1 ? 'Bild' : 'Bilder'} (${formatBytes(newTotalSize)})`;
+            }
+          }
+        }
+        
+        // Update lightbox state in-place
+        lightboxImagesList.splice(lightboxCurrentIndex, 1);
+        if (lightboxImagesList.length === 0) {
+          closeLightbox();
+        } else {
+          lightboxCurrentIndex = Math.min(lightboxCurrentIndex, lightboxImagesList.length - 1);
+          loadLightboxImage();
+        }
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+  });
+}
 
 // Close on click outside the image
 lightboxModal.addEventListener('click', (e) => {

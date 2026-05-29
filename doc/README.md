@@ -76,7 +76,7 @@ Nginx fängt Anfragen auf Port 80 und 443 ab und leitet sie an den Node-Server w
 Key-Features der Nginx-Konfiguration:
 1. **HTTPS-Erzwingung**: Alle Anfragen auf Port 80 (HTTP) werden mit Statuscode 301 permanent auf HTTPS umgeleitet.
 2. **SSL-Zertifikate**: Verschlüsselung über Let's Encrypt Wildcard-Zertifikate für `meditation.tnickel-ki.de`.
-3. **Upload-Limit (`client_max_body_size 500m;`)**: Standardmäßig begrenzt Nginx Requests auf 1MB. Um Bulk-Bilderuploads und Zip-Uploads zu ermöglichen, ist dieses Limit auf **500 Megabyte** angehoben.
+3. **Upload-Limit (`client_max_body_size 2g;`)**: Standardmäßig begrenzt Nginx Requests auf 1MB. Um Bulk-Bilderuploads und Zip-Uploads zu ermöglichen, ist dieses Limit auf **2 Gigabyte** angehoben.
 4. **Static Bypass für `/uploads/`**:
    * Die Direktive `location ^~ /uploads/` sorgt dafür, dass hochgeladene Dateien direkt über den Node-Prozess und nicht direkt von Nginx ausgeliefert werden. Dies schützt vor unberechtigtem Direktzugriff und sichert die Einhaltung der Anwendungskontrollen.
 

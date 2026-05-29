@@ -84,8 +84,8 @@ server {
     listen 80;
     server_name deine-domain.de; # Hier deine Domain oder IP eintragen
 
-    # Maximale Upload-Größe für große ZIP-Archive anpassen (z.B. 500 Megabytes)
-    client_max_body_size 500M;
+    # Maximale Upload-Größe für große ZIP-Archive anpassen (z.B. 2 Gigabytes)
+    client_max_body_size 2G;
 
     location / {
         proxy_pass http://localhost:3000;

@@ -308,6 +308,48 @@ module.exports = {
     return true;
   },
 
+  deleteFileFromSession(id, filename, username) {
+    const db = readDb();
+    const index = db.sessions.findIndex(s => s.id === id);
+    if (index === -1) {
+      throw new Error('Session nicht gefunden.');
+    }
+
+    const session = db.sessions[index];
+    const currentUser = db.users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    
+    if (!currentUser) {
+      throw new Error('Nicht autorisiert.');
+    }
+
+    // Only owner or admin can delete
+    if (currentUser.role !== 'admin' && session.uploadedBy.toLowerCase() !== username.toLowerCase()) {
+      throw new Error('Keine Berechtigung zum Löschen dieses Bildes.');
+    }
+
+    const fileIndex = session.files.findIndex(f => f.filename === filename);
+    if (fileIndex === -1) {
+      throw new Error('Datei nicht in der Session gefunden.');
+    }
+
+    // Delete file from disk
+    const safeFilename = path.basename(filename);
+    const filePath = path.join(UPLOADS_DIR, id, safeFilename);
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (err) {
+        console.error(`Error deleting file ${filename} from disk:`, err);
+      }
+    }
+
+    // Remove file entry from DB
+    session.files.splice(fileIndex, 1);
+    
+    writeDb(db);
+    return true;
+  },
+
   updateSessionTitle(id, title, username) {
     const db = readDb();
     const index = db.sessions.findIndex(s => s.id === id);

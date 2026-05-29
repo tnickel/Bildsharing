@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const AdmZip = require('adm-zip');
+const { ZipArchive } = require('archiver');
 const db = require('./db');
 const security = require('./security');
 
@@ -299,6 +300,18 @@ app.delete('/api/sessions/:id', requireAuth, (req, res) => {
   }
 });
 
+// Delete a single image/file from a session
+app.delete('/api/sessions/:id/files/:filename', requireAuth, (req, res) => {
+  const sessionId = req.params.id;
+  const filename = req.params.filename;
+  try {
+    db.deleteFileFromSession(sessionId, filename, req.session.user.username);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Rename a session
 app.put('/api/sessions/:id', requireAuth, (req, res) => {
   const sessionId = req.params.id;
@@ -481,9 +494,7 @@ app.get('/api/sessions/:id/download', requireAuth, (req, res) => {
   }
 
   try {
-    const zip = new AdmZip();
-    zip.addLocalFolder(sessionDir);
-    const zipBuffer = zip.toBuffer();
+    const archive = new ZipArchive({ zlib: { level: 9 } });
 
     // Format safe filename
     const safeTitle = (session.title || 'bilder')
@@ -494,10 +505,20 @@ app.get('/api/sessions/:id/download', requireAuth, (req, res) => {
 
     res.setHeader('Content-Disposition', `attachment; filename="${safeTitle || 'images'}.zip"`);
     res.setHeader('Content-Type', 'application/zip');
-    res.send(zipBuffer);
+
+    archive.on('error', (err) => {
+      throw err;
+    });
+
+    archive.pipe(res);
+    archive.directory(sessionDir, false);
+    archive.finalize();
+
   } catch (err) {
     console.error('Error generating download ZIP:', err);
-    res.status(500).json({ error: 'Fehler beim Generieren der ZIP-Datei.' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Fehler beim Generieren der ZIP-Datei.' });
+    }
   }
 });
 
@@ -524,18 +545,8 @@ app.post('/api/sessions/:id/download-selected', requireAuth, (req, res) => {
   }
 
   try {
-    const zip = new AdmZip();
-    for (const filename of filenames) {
-      // Prevent directory traversal
-      const safeFilename = path.basename(filename);
-      const filePath = path.join(sessionDir, safeFilename);
-      if (fs.existsSync(filePath)) {
-        zip.addLocalFile(filePath);
-      }
-    }
+    const archive = new ZipArchive({ zlib: { level: 9 } });
 
-    const zipBuffer = zip.toBuffer();
-    
     // Format safe filename
     const safeTitle = `${(session.title || 'bilder')}-auswahl`
       .toLowerCase()
@@ -545,10 +556,89 @@ app.post('/api/sessions/:id/download-selected', requireAuth, (req, res) => {
 
     res.setHeader('Content-Disposition', `attachment; filename="${safeTitle || 'selection'}.zip"`);
     res.setHeader('Content-Type', 'application/zip');
-    res.send(zipBuffer);
+
+    archive.on('error', (err) => {
+      throw err;
+    });
+
+    archive.pipe(res);
+
+    for (const filename of filenames) {
+      // Prevent directory traversal
+      const safeFilename = path.basename(filename);
+      const filePath = path.join(sessionDir, safeFilename);
+      if (fs.existsSync(filePath)) {
+        archive.file(filePath, { name: safeFilename });
+      }
+    }
+
+    archive.finalize();
+
   } catch (err) {
     console.error('Error generating selection ZIP:', err);
-    res.status(500).json({ error: 'Fehler beim Generieren der ZIP-Datei.' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Fehler beim Generieren der ZIP-Datei.' });
+    }
+  }
+});
+
+// Download all sessions visible to the user as a single ZIP file
+app.get('/api/sessions/download-all', requireAuth, (req, res) => {
+  try {
+    const userSessions = db.getSessionsForUser(req.session.user.username);
+    if (!userSessions || userSessions.length === 0) {
+      return res.status(400).json({ error: 'Keine Bildergalerien vorhanden.' });
+    }
+
+    const archive = new ZipArchive({ zlib: { level: 9 } });
+
+    res.setHeader('Content-Disposition', 'attachment; filename="alle-bildergalerien.zip"');
+    res.setHeader('Content-Type', 'application/zip');
+
+    archive.on('error', (err) => {
+      throw err;
+    });
+
+    archive.pipe(res);
+
+    const usedFolderNames = new Set();
+    let hasFiles = false;
+
+    for (const session of userSessions) {
+      const sessionDir = path.join(UPLOADS_DIR, session.id);
+      if (!fs.existsSync(sessionDir)) continue;
+
+      // Sanitize folder name for the zip structure
+      let safeTitle = (session.title || 'bilder')
+        .replace(/[^a-zA-Z0-9_\-\s]/g, '')
+        .trim();
+      if (!safeTitle) safeTitle = 'bilder';
+
+      let folderName = safeTitle;
+      let counter = 1;
+      while (usedFolderNames.has(folderName.toLowerCase())) {
+        counter++;
+        folderName = `${safeTitle}_${counter}`;
+      }
+      usedFolderNames.add(folderName.toLowerCase());
+
+      for (const file of session.files) {
+        const safeFilename = path.basename(file.filename);
+        const filePath = path.join(sessionDir, safeFilename);
+        if (fs.existsSync(filePath)) {
+          archive.file(filePath, { name: `${folderName}/${safeFilename}` });
+          hasFiles = true;
+        }
+      }
+    }
+
+    archive.finalize();
+
+  } catch (err) {
+    console.error('Error generating download-all ZIP:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Fehler beim Generieren der ZIP-Datei.' });
+    }
   }
 });
 

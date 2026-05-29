@@ -48,7 +48,7 @@ body {
   background-image: 
     linear-gradient(135deg, rgba(10, 18, 14, 0.4) 0%, rgba(5, 10, 8, 0.75) 100%),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' viewBox='0 0 240 240'%3E%3Cpath d='M40,180 C70,140 130,130 160,50 C130,90 70,110 40,180 Z M40,180 C80,158 120,138 160,50' fill='none' stroke='%2310b981' stroke-width='0.3' stroke-opacity='0.008'/%3E%3Cpath d='M200,60 C170,100 110,110 80,190 C110,150 170,130 200,60 Z' fill='none' stroke='%23f59e0b' stroke-width='0.3' stroke-opacity='0.005'/%3E%3C/svg%3E"),
-    url('../images/login-bg.png');
+    url('../images/login-bg.webp');
   background-size: auto, auto, cover;
   background-position: center, center, center;
   background-attachment: fixed;
@@ -350,7 +350,7 @@ input[type="password"]:focus,
   display: flex;
   justify-content: center;
   align-items: center;
-  background-image: linear-gradient(135deg, rgba(10, 18, 14, 0.3) 0%, rgba(5, 10, 8, 0.65) 100%), url('../images/login-bg.png');
+  background-image: linear-gradient(135deg, rgba(10, 18, 14, 0.3) 0%, rgba(5, 10, 8, 0.65) 100%), url('../images/login-bg.webp');
   background-size: cover;
   background-position: center;
   z-index: 999;
@@ -699,12 +699,33 @@ input[type="password"]:focus,
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 8px;
+  position: relative;
 }
 
 .progress-bar-fill {
   height: 100%;
   background: var(--primary-gradient);
   transition: width 0.1s ease;
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.progress-bar-fill.indeterminate {
+  width: 40% !important;
+  background: var(--primary-gradient);
+  position: absolute;
+  left: -40%;
+  animation: progressIndeterminate 1.2s infinite ease-in-out;
+}
+
+@keyframes progressIndeterminate {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
 }
 
 .progress-status {
@@ -723,6 +744,9 @@ input[type="password"]:focus,
   position: absolute;
   top: 24px;
   right: 24px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 
 .sessions-panel .accordion {
@@ -1044,6 +1068,7 @@ input[type="password"]:focus,
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 12px;
   transition: opacity var(--transition-fast);
 }
 
@@ -1076,6 +1101,36 @@ input[type="password"]:focus,
 }
 
 .thumb-download-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.thumb-delete-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(220, 53, 69, 0.9);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  transform: translateY(10px);
+  transition: all var(--transition-fast);
+}
+
+.img-thumb-container:hover .thumb-delete-btn {
+  transform: translateY(0);
+}
+
+.thumb-delete-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+  background: #dc3545;
+}
+
+.thumb-delete-btn svg {
   width: 16px;
   height: 16px;
 }
@@ -1489,6 +1544,25 @@ input[type="password"]:focus,
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.download-toast-cancel-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  transition: all var(--transition-fast);
+}
+
+.download-toast-cancel-btn:hover {
+  color: var(--accent-red);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .download-toast-icon {
