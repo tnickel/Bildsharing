@@ -4,11 +4,12 @@ const crypto = require('crypto');
 
 const DB_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DB_DIR, 'db.json');
+const SECRETS_FILE = path.join(DB_DIR, 'secrets.json');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 
-// Global salt/pepper to hash passwords. Using the same salt ensures users with the same
-// password get the same hash, enabling password-based group sharing.
-const SERVER_SALT = 'bildsharing-platform-secure-salt-2026';
+const PASSWORD_ITERATIONS = 310000;
+const PASSWORD_KEYLEN = 32;
+const PASSWORD_DIGEST = 'sha256';
 
 // Create directories if they do not exist
 if (!fs.existsSync(DB_DIR)) {
@@ -17,6 +18,44 @@ if (!fs.existsSync(DB_DIR)) {
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
+
+function readOrCreateSecrets() {
+  if (process.env.PASSWORD_PEPPER && process.env.SESSION_SECRET) {
+    return {
+      passwordPepper: process.env.PASSWORD_PEPPER,
+      sessionSecret: process.env.SESSION_SECRET
+    };
+  }
+
+  let secrets = {};
+  if (fs.existsSync(SECRETS_FILE)) {
+    try {
+      secrets = JSON.parse(fs.readFileSync(SECRETS_FILE, 'utf8'));
+    } catch (err) {
+      console.error('Error reading secrets file:', err);
+    }
+  }
+
+  if (!secrets.passwordPepper) {
+    secrets.passwordPepper = crypto.randomBytes(32).toString('hex');
+  }
+  if (!secrets.sessionSecret) {
+    secrets.sessionSecret = crypto.randomBytes(48).toString('hex');
+  }
+
+  try {
+    fs.writeFileSync(SECRETS_FILE, JSON.stringify(secrets, null, 2), { encoding: 'utf8', mode: 0o600 });
+  } catch (err) {
+    console.error('Error writing secrets file:', err);
+  }
+
+  return {
+    passwordPepper: process.env.PASSWORD_PEPPER || secrets.passwordPepper,
+    sessionSecret: process.env.SESSION_SECRET || secrets.sessionSecret
+  };
+}
+
+const serverSecrets = readOrCreateSecrets();
 
 // Initial database template
 const defaultDb = {
@@ -48,9 +87,72 @@ function writeDb(data) {
   }
 }
 
-// Hash password with static server salt
+function createPasswordRecord(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, PASSWORD_ITERATIONS, PASSWORD_KEYLEN, PASSWORD_DIGEST).toString('hex');
+  return `pbkdf2$${PASSWORD_ITERATIONS}$${salt}$${hash}`;
+}
+
+function createPasswordGroup(password) {
+  return crypto.createHmac('sha256', serverSecrets.passwordPepper).update(password).digest('hex');
+}
+
+function safeEqual(a, b) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function verifyPassword(password, storedPassword) {
+  if (!storedPassword) return false;
+
+  if (storedPassword.startsWith('pbkdf2$')) {
+    const parts = storedPassword.split('$');
+    if (parts.length !== 4) return false;
+    const iterations = Number(parts[1]);
+    const salt = parts[2];
+    const expectedHash = parts[3];
+    const actualHash = crypto.pbkdf2Sync(password, salt, iterations, PASSWORD_KEYLEN, PASSWORD_DIGEST).toString('hex');
+    return safeEqual(actualHash, expectedHash);
+  }
+
+  // Legacy HMAC-SHA256 support for accounts not yet migrated.
+  return safeEqual(hashPassword(password), storedPassword);
+}
+
+// Legacy hash kept only so old DB entries can still log in before password rotation.
 function hashPassword(password) {
-  return crypto.createHmac('sha256', SERVER_SALT).update(password).digest('hex');
+  return crypto.createHmac('sha256', 'bildsharing-platform-secure-salt-2026').update(password).digest('hex');
+}
+
+function applyPassword(user, password) {
+  user.password = createPasswordRecord(password);
+  user.passwordGroup = createPasswordGroup(password);
+  delete user.plainPassword;
+}
+
+function migrateStoredPasswords() {
+  const db = readDb();
+  let changed = false;
+
+  db.users.forEach(user => {
+    if (user.plainPassword) {
+      applyPassword(user, user.plainPassword);
+      changed = true;
+      return;
+    }
+
+    if (!user.passwordGroup) {
+      // Legacy rows without a plaintext migration source keep their old sharing bucket
+      // until the admin rotates their password.
+      user.passwordGroup = `legacy:${user.password}`;
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    writeDb(db);
+  }
 }
 
 // Seed admin user if DB is empty or has no admin
@@ -60,24 +162,24 @@ function seedAdmin() {
   if (!hasAdmin) {
     const adminUser = {
       username: 'admin',
-      password: hashPassword('admin123'), // Default password, user can delete/re-create or we log it
-      plainPassword: 'admin123',
       role: 'admin',
       createdAt: new Date().toISOString()
     };
+    applyPassword(adminUser, process.env.INITIAL_ADMIN_PASSWORD || crypto.randomBytes(18).toString('base64url'));
     db.users.push(adminUser);
     writeDb(db);
     console.log('--- ADMIN SEED ---');
     console.log('Created default admin account:');
     console.log('Username: admin');
-    console.log('Password: admin123');
-    console.log('Please change the password or create a new admin after login!');
+    console.log('Password was generated or read from INITIAL_ADMIN_PASSWORD.');
+    console.log('Set INITIAL_ADMIN_PASSWORD on first deployment and rotate it after login.');
     console.log('------------------');
   }
 }
 
 // Seed the admin user upon loading this module
 seedAdmin();
+migrateStoredPasswords();
 
 // Seed demo user
 function seedDemoUser() {
@@ -86,11 +188,10 @@ function seedDemoUser() {
   if (!hasDemo) {
     const demoUser = {
       username: 'demo',
-      password: hashPassword('demo123'),
-      plainPassword: 'demo123',
       role: 'user',
       createdAt: new Date().toISOString()
     };
+    applyPassword(demoUser, 'demo123');
     db.users.push(demoUser);
     writeDb(db);
   }
@@ -156,6 +257,8 @@ seedDemoSession();
 
 module.exports = {
   hashPassword,
+  verifyPassword,
+  sessionSecret: serverSecrets.sessionSecret,
 
   getUploadedFilesCountInLastHour(username) {
     const db = readDb();
@@ -174,8 +277,7 @@ module.exports = {
     return db.users.map(u => ({
       username: u.username,
       role: u.role,
-      createdAt: u.createdAt,
-      plainPassword: u.plainPassword || 'N/A'
+      createdAt: u.createdAt
     }));
   },
 
@@ -195,11 +297,10 @@ module.exports = {
 
     const newUser = {
       username: normalizedUsername,
-      password: hashPassword(password),
-      plainPassword: password,
       role: role,
       createdAt: new Date().toISOString()
     };
+    applyPassword(newUser, password);
 
     db.users.push(newUser);
     writeDb(db);
@@ -230,8 +331,7 @@ module.exports = {
     if (!user) {
       throw new Error('Benutzer nicht gefunden.');
     }
-    user.password = hashPassword(password);
-    user.plainPassword = password;
+    applyPassword(user, password);
     writeDb(db);
     return true;
   },
@@ -249,9 +349,9 @@ module.exports = {
       return db.sessions;
     }
 
-    // Find all users who share the exact same password hash
+    // Find all users who share the same password group without storing plaintext passwords.
     const sharingGroupUsernames = db.users
-      .filter(u => u.password === currentUser.password)
+      .filter(u => u.passwordGroup && u.passwordGroup === currentUser.passwordGroup)
       .map(u => u.username.toLowerCase());
 
     // Filter sessions uploaded by anyone in this group
@@ -381,15 +481,14 @@ module.exports = {
   getStorageStats() {
     const db = readDb();
     
-    // Group users by password hash (sharing group)
+    // Group users by password group (sharing group)
     const groupsMap = {};
     db.users.forEach(u => {
       // Exclude admin from regular group storage counting if desired, but let's count for all users
-      const hash = u.password;
+      const hash = u.passwordGroup || `legacy:${u.password}`;
       if (!groupsMap[hash]) {
         groupsMap[hash] = {
-          usernames: [],
-          plainPassword: u.plainPassword || 'N/A'
+          usernames: []
         };
       }
       groupsMap[hash].usernames.push(u.username);
@@ -416,7 +515,6 @@ module.exports = {
 
       stats.push({
         usernames: groupInfo.usernames,
-        plainPassword: groupInfo.plainPassword,
         totalSize: totalSize,
         sessionCount: groupSessions.length,
         fileCount: fileCount

@@ -129,12 +129,8 @@ function logEvent(type, ip, message) {
 
 // Helper to extract IP taking reverse proxy into account
 function getClientIp(req) {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    // Return first IP in the list
-    return forwarded.split(',')[0].trim();
-  }
-  return req.ip || req.socket.remoteAddress;
+  const ip = req.ip || req.socket.remoteAddress || '';
+  return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 }
 
 // Check if IP is currently banned

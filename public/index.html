@@ -38,7 +38,8 @@
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/><path d="M12 5v3"/><path d="M12 14v3"/><path d="M5 12h3"/><path d="M16 12h3"/></svg>
           </div>
           <h1>ZenShare</h1>
-          <p>Finde Stille im Chaos — Ein geschützter Raum zum Teilen deiner schönsten Natur- und Meditationsmomente.</p>
+          <p>Finde Stille im Chaos — Ein geschützter Raum zum Teilen deiner schönsten Natur- und Meditationsmomente. <br>
+          <a href="https://tnickel-ki.de/blogs/blog-picturesharing-simple.html" target="_blank" rel="noopener" class="auth-blog-link">Was ist ZenShare? (Einfach erklärt)</a></p>
         </div>
         <form id="login-form">
           <div class="form-group">
@@ -76,6 +77,8 @@
       <!-- Shared Legal Footer (Login Page) -->
       <footer class="app-footer auth-footer">
         <span>&copy; 2026 ZenShare. Alle Rechte vorbehalten.</span>
+        <span class="footer-divider">|</span>
+        <a href="https://tnickel-ki.de/blogs/blog-picturesharing-simple.html" target="_blank" rel="noopener">ZenShare einfach erklärt (Blog)</a>
         <span class="footer-divider">|</span>
         <a href="javascript:void(0)" class="impressum-link">Impressum</a>
         <span class="footer-divider">|</span>
@@ -289,7 +292,6 @@
                 <tr>
                   <th>Benutzername</th>
                   <th>Rolle</th>
-                  <th>Passwort</th>
                   <th>Erstellt am</th>
                   <th>Aktion</th>
                 </tr>
@@ -314,7 +316,6 @@
             <thead>
               <tr>
                 <th>Gruppe (Benutzer)</th>
-                <th>Gemeinsames Passwort</th>
                 <th>Galerien</th>
                 <th>Dateien</th>
                 <th>Gesamtgröße</th>
@@ -412,6 +413,8 @@
       <footer class="app-footer dashboard-footer">
         <span>&copy; 2026 ZenShare. Alle Rechte vorbehalten.</span>
         <span class="footer-divider">|</span>
+        <a href="https://tnickel-ki.de/blogs/blog-picturesharing-simple.html" target="_blank" rel="noopener">ZenShare einfach erklärt (Blog)</a>
+        <span class="footer-divider">|</span>
         <a href="javascript:void(0)" class="impressum-link">Impressum</a>
         <span class="footer-divider">|</span>
         <a href="javascript:void(0)" class="datenschutz-link">Datenschutzerklärung</a>
@@ -448,7 +451,32 @@
 
     <!-- Lightbox Modal for Premium Image Viewing -->
     <div id="lightbox-modal" class="lightbox-modal hidden">
+      <!-- Slideshow progress bar -->
+      <div id="lightbox-progress-container" class="lightbox-progress-container hidden">
+        <div id="lightbox-progress-bar" class="lightbox-progress-bar"></div>
+      </div>
+
       <button class="lightbox-btn lightbox-close" id="lightbox-close-btn" title="Schließen (Esc)">&times;</button>
+      
+      <!-- Floating slideshow control panel inside Lightbox -->
+      <div id="lightbox-slideshow-controls" class="lightbox-slideshow-controls hidden">
+        <button id="lightbox-play-pause-btn" class="slideshow-ctrl-btn" title="Pausieren/Fortsetzen (Leertaste)">
+          <svg id="play-icon" class="hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <svg id="pause-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+        </button>
+        <span class="slideshow-divider"></span>
+        <div class="slideshow-delay-wrapper">
+          <span style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500;">Intervall:</span>
+          <select id="lightbox-slideshow-delay" class="slideshow-delay-select" title="Verzögerungszeit ändern">
+            <option value="2">2s</option>
+            <option value="3" selected>3s</option>
+            <option value="5">5s</option>
+            <option value="10">10s</option>
+            <option value="15">15s</option>
+          </select>
+        </div>
+      </div>
+
       <button class="lightbox-btn lightbox-prev" id="lightbox-prev-btn" title="Vorheriges Bild (Pfeiltaste links)">&#10094;</button>
       <button class="lightbox-btn lightbox-next" id="lightbox-next-btn" title="Nächstes Bild (Pfeiltaste rechts)">&#10095;</button>
       <div class="lightbox-content-wrapper">

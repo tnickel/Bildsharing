@@ -42,15 +42,15 @@ Der Server ist standardmäßig unter **http://localhost:3000** erreichbar.
 
 ---
 
-## Standard-Logins & Konfiguration
+## Erststart & Konfiguration
 
 Beim ersten Start wird automatisch ein standardmäßiger Administrator-Account angelegt, falls noch kein Admin in der Datenbank existiert:
 
 * **Benutzername**: `admin`
-* **Passwort**: `admin123`
+* **Passwort**: per `INITIAL_ADMIN_PASSWORD` beim Erststart setzen
 
 > [!WARNING]
-> Melde dich nach dem ersten Start als `admin` an, gehe in den **Admin-Bereich**, erstelle einen neuen Admin-Account deiner Wahl und lösche anschließend den Standard-Account `admin` oder ändere das Passwort ab, um die Sicherheit deines Webservers zu gewährleisten.
+> Melde dich nach dem ersten Start als `admin` an und setze ein starkes Passwort. Passwörter können aus Sicherheitsgründen nicht mehr angezeigt, sondern nur neu gesetzt werden.
 
 ### Datenhaltung
 Sämtliche Benutzerdaten und Metadaten werden in `data/db.json` gespeichert. Die hochgeladenen Bilder werden im Ordner `uploads/<session-id>/` abgelegt. Es wird keine externe Datenbank benötigt.

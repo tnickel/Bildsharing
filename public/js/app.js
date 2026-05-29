@@ -85,6 +85,14 @@ const downloadToastBtnAbort = document.getElementById('download-toast-btn-abort'
 let lightboxImagesList = [];
 let lightboxCurrentIndex = -1;
 
+// Slideshow State
+let isSlideshowActive = false;
+let isSlideshowPaused = false;
+let slideshowProgress = 0;
+let slideshowLastTimestamp = null;
+let slideshowDurationMs = 3000;
+let slideshowAnimationId = null;
+
 // Object URLs for pre-upload previews
 let objectUrls = [];
 
@@ -261,6 +269,7 @@ function setupDashboardView() {
 
   showSection('dashboard');
   loadSessions();
+  applyDemoUploadState();
   updateUploadPulses();
 }
 
@@ -357,7 +366,7 @@ createUserForm.addEventListener('submit', async (e) => {
 });
 
 async function loadUsers() {
-  userListTbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Lade Benutzer...</td></tr>';
+  userListTbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Lade Benutzer...</td></tr>';
   
   try {
     const res = await fetch('/api/admin/users');
@@ -365,7 +374,7 @@ async function loadUsers() {
     const users = await res.json();
 
     if (users.length === 0) {
-      userListTbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Keine Benutzer registriert.</td></tr>';
+      userListTbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Keine Benutzer registriert.</td></tr>';
       return;
     }
 
@@ -387,17 +396,11 @@ async function loadUsers() {
       tr.innerHTML = `
         <td><strong>${escapeHtml(user.username)}</strong></td>
         <td><span class="badge ${user.role === 'admin' ? 'badge-admin' : 'badge-secondary'}">${user.role}</span></td>
-        <td>
-          <span class="password-text masked" data-password="${escapeHtml(user.plainPassword)}">••••••••</span>
-          <button class="toggle-password-btn" title="Passwort anzeigen/verbergen">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
-          <button class="btn btn-secondary btn-sm change-password-btn" data-username="${escapeHtml(user.username)}" title="Passwort ändern" style="margin-left: 6px; padding: 2px 6px; font-size: 0.75rem; vertical-align: middle;">
-            Ändern
-          </button>
-        </td>
         <td>${createdDate}</td>
         <td>
+          <button class="btn btn-secondary btn-sm change-password-btn" data-username="${escapeHtml(user.username)}" title="Passwort neu setzen" style="margin-right: 6px; padding: 2px 6px; font-size: 0.75rem; vertical-align: middle;">
+            Passwort setzen
+          </button>
           <button class="btn btn-danger btn-sm delete-user-btn" 
                   data-username="${user.username}"
                   ${isSelf || isMainAdmin ? 'disabled' : ''} 
@@ -466,31 +469,14 @@ async function loadUsers() {
       });
     });
 
-    // Add event listeners to toggle password buttons
-    userListTbody.querySelectorAll('.toggle-password-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const td = e.target.closest('td');
-        const textSpan = td.querySelector('.password-text');
-        const plainPass = textSpan.getAttribute('data-password');
-        
-        if (textSpan.classList.contains('masked')) {
-          textSpan.textContent = plainPass;
-          textSpan.classList.remove('masked');
-        } else {
-          textSpan.textContent = '••••••••';
-          textSpan.classList.add('masked');
-        }
-      });
-    });
-
   } catch (err) {
-    userListTbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">${err.message}</td></tr>`;
+    userListTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--accent-red);">${err.message}</td></tr>`;
   }
 }
 
 async function loadStorageStats() {
   const tbody = document.getElementById('storage-stats-tbody');
-  tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Lade Speicherstatistik...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Lade Speicherstatistik...</td></tr>';
   
   try {
     const res = await fetch('/api/admin/storage-stats');
@@ -498,7 +484,7 @@ async function loadStorageStats() {
     const stats = await res.json();
     
     if (stats.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Keine Sharing-Gruppen vorhanden.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Keine Sharing-Gruppen vorhanden.</td></tr>';
       return;
     }
     
@@ -510,12 +496,6 @@ async function loadStorageStats() {
       
       tr.innerHTML = `
         <td><strong>${membersList}</strong></td>
-        <td>
-          <span class="password-text masked" data-password="${escapeHtml(group.plainPassword)}">••••••••</span>
-          <button class="toggle-password-btn" title="Passwort anzeigen/verbergen">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
-        </td>
         <td>${group.sessionCount}</td>
         <td>${group.fileCount}</td>
         <td><strong style="color: var(--accent-green);">${sizeStr}</strong></td>
@@ -523,32 +503,36 @@ async function loadStorageStats() {
       tbody.appendChild(tr);
     });
     
-    // Add listeners for password toggling in storage stats
-    tbody.querySelectorAll('.toggle-password-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const td = e.target.closest('td');
-        const textSpan = td.querySelector('.password-text');
-        const plainPass = textSpan.getAttribute('data-password');
-        
-        if (textSpan.classList.contains('masked')) {
-          textSpan.textContent = plainPass;
-          textSpan.classList.remove('masked');
-        } else {
-          textSpan.textContent = '••••••••';
-          textSpan.classList.add('masked');
-        }
-      });
-    });
-    
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--accent-red);">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
 // --- UPLOAD HANDLING & DRAG AND DROP ---
 
+function isDemoUser() {
+  return currentUser && currentUser.username.toLowerCase() === 'demo';
+}
+
+function applyDemoUploadState() {
+  if (!isDemoUser()) {
+    fileInput.disabled = false;
+    dropzone.classList.remove('disabled');
+    uploadError.classList.add('hidden');
+    return;
+  }
+
+  selectedFiles = [];
+  updateSelectedFilesUI();
+  fileInput.disabled = true;
+  dropzone.classList.add('disabled');
+  uploadError.textContent = 'Der Demozugang darf keine Dateien hochladen.';
+  uploadError.classList.remove('hidden');
+}
+
 // Trigger file dialog
 dropzone.addEventListener('click', () => {
+  if (isDemoUser()) return;
   fileInput.click();
 });
 
@@ -572,12 +556,19 @@ fileInput.addEventListener('change', (e) => {
 });
 
 dropzone.addEventListener('drop', (e) => {
+  if (isDemoUser()) return;
   const dt = e.dataTransfer;
   const files = dt.files;
   handleFilesSelection(files);
 });
 
 function handleFilesSelection(filesList) {
+  if (isDemoUser()) {
+    uploadError.textContent = 'Der Demozugang darf keine Dateien hochladen.';
+    uploadError.classList.remove('hidden');
+    return;
+  }
+
   // Reset previous alerts
   uploadSuccess.classList.add('hidden');
   uploadError.classList.add('hidden');
@@ -599,7 +590,7 @@ function updateSelectedFilesUI() {
 
   selectedFilesList.innerHTML = '';
   
-  if (selectedFiles.length === 0) {
+  if (selectedFiles.length === 0 || isDemoUser()) {
     selectedFilesContainer.classList.add('hidden');
     uploadSubmitBtn.disabled = true;
     if (uploadCancelBtn) uploadCancelBtn.classList.add('hidden');
@@ -608,7 +599,7 @@ function updateSelectedFilesUI() {
   }
 
   selectedFilesContainer.classList.remove('hidden');
-  uploadSubmitBtn.disabled = false;
+  uploadSubmitBtn.disabled = isDemoUser();
   if (uploadCancelBtn) uploadCancelBtn.classList.remove('hidden');
   fileCountSpan.textContent = selectedFiles.length;
   updateUploadPulses();
@@ -690,25 +681,10 @@ uploadForm.addEventListener('submit', async (e) => {
   uploadSuccess.classList.add('hidden');
   uploadSubmitBtn.disabled = true;
 
-  // Pre-check upload limits for demo user
-  if (currentUser && currentUser.username.toLowerCase() === 'demo') {
-    try {
-      const checkRes = await fetch('/api/demo/upload-count');
-      if (!checkRes.ok) throw new Error('Fehler beim Abrufen des Upload-Status.');
-      const checkData = await checkRes.json();
-      
-      const alreadyUploaded = checkData.count;
-      const incomingCount = selectedFiles.length;
-      
-      if (alreadyUploaded + incomingCount > 10) {
-        uploadError.textContent = `Limit im Demomodus überschritten. Sie können maximal 10 Bilder pro Stunde hochladen (bereits hochgeladen: ${alreadyUploaded}, ausgewählt: ${incomingCount}).`;
-        uploadError.classList.remove('hidden');
-        uploadSubmitBtn.disabled = false;
-        return;
-      }
-    } catch (err) {
-      console.error('Error pre-checking demo limits:', err);
-    }
+  if (isDemoUser()) {
+    uploadError.textContent = 'Der Demozugang darf keine Dateien hochladen.';
+    uploadError.classList.remove('hidden');
+    return;
   }
 
   uploadProgressWrapper.classList.remove('hidden');
@@ -927,6 +903,21 @@ function createSessionCard(session) {
       </div>
       
       <div class="session-actions">
+        <!-- Segmented Diashow Button & delay select group -->
+        <div class="slideshow-control-group" title="Diashow starten">
+          <button class="btn btn-secondary btn-sm slideshow-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px; height:14px; color: var(--accent-purple); fill: rgba(245, 158, 11, 0.2);"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <span class="btn-text">Diashow</span>
+          </button>
+          <select class="slideshow-delay-select-header" title="Verzögerungszeit ändern">
+            <option value="2">2s</option>
+            <option value="3" selected>3s</option>
+            <option value="5">5s</option>
+            <option value="10">10s</option>
+            <option value="15">15s</option>
+          </select>
+        </div>
+
         <!-- Normal full ZIP download button -->
         <button class="btn btn-secondary btn-sm download-zip-btn" title="Komplette Session als ZIP herunterladen">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px; height:16px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
@@ -962,8 +953,8 @@ function createSessionCard(session) {
   // Toggle Accordion functionality
   const header = card.querySelector('.session-header');
   header.addEventListener('click', (e) => {
-    // If click originates from actions or edit input, ignore collapse toggle
-    if (e.target.closest('.session-actions button') || e.target.closest('.edit-session-title-btn') || e.target.closest('.session-title-edit-wrapper')) {
+    // If click originates from actions, slideshow group, or edit input, ignore collapse toggle
+    if (e.target.closest('.session-actions button') || e.target.closest('.slideshow-control-group') || e.target.closest('.edit-session-title-btn') || e.target.closest('.session-title-edit-wrapper')) {
       return;
     }
     
@@ -1058,6 +1049,31 @@ function createSessionCard(session) {
         });
       });
     }
+  }
+
+  // Action: Slideshow Button Click
+  const slideshowBtn = card.querySelector('.slideshow-btn');
+  const delaySelectHeader = card.querySelector('.slideshow-delay-select-header');
+  
+  if (slideshowBtn && delaySelectHeader) {
+    slideshowBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const delaySeconds = parseInt(delaySelectHeader.value) || 3;
+      startSlideshow(session, delaySeconds);
+    });
+
+    delaySelectHeader.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+
+    delaySelectHeader.addEventListener('change', (e) => {
+      if (isSlideshowActive) {
+        const val = parseInt(e.target.value) || 3;
+        slideshowDurationMs = val * 1000;
+        const lbSelect = document.getElementById('lightbox-slideshow-delay');
+        if (lbSelect) lbSelect.value = val;
+      }
+    });
   }
 
   // Action: Download ZIP
@@ -1276,6 +1292,10 @@ function openLightbox(imagesList, startIndex) {
   lightboxModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden'; // Disable background scrolling
   
+  if (!isSlideshowActive) {
+    resetSlideshowUI();
+  }
+
   loadLightboxImage();
 }
 
@@ -1285,6 +1305,119 @@ function closeLightbox() {
   
   lightboxImg.src = '';
   lightboxImg.classList.remove('zoomed');
+
+  stopSlideshow();
+}
+
+function startSlideshow(session, delaySeconds) {
+  const isOwner = session.uploadedBy.toLowerCase() === currentUser.username.toLowerCase();
+  const isAdmin = currentUser.role === 'admin';
+  const showDelete = isOwner || isAdmin;
+
+  const sessionImages = session.files.map(f => ({
+    url: `/uploads/${session.id}/${encodeURIComponent(f.filename)}`,
+    title: f.filename,
+    sessionId: session.id,
+    filename: f.filename,
+    showDelete: showDelete
+  }));
+
+  if (sessionImages.length === 0) {
+    alert('Diese Galerie enthält keine Bilder für eine Diashow.');
+    return;
+  }
+
+  isSlideshowActive = true;
+  isSlideshowPaused = false;
+  slideshowProgress = 0;
+  slideshowDurationMs = delaySeconds * 1000;
+  slideshowLastTimestamp = null;
+
+  const lbDelaySelect = document.getElementById('lightbox-slideshow-delay');
+  if (lbDelaySelect) {
+    lbDelaySelect.value = delaySeconds.toString();
+  }
+
+  updateLightboxPlayPauseIcon();
+
+  document.getElementById('lightbox-slideshow-controls').classList.remove('hidden');
+  document.getElementById('lightbox-progress-container').classList.remove('hidden');
+
+  openLightbox(sessionImages, 0);
+
+  if (slideshowAnimationId) {
+    cancelAnimationFrame(slideshowAnimationId);
+  }
+  slideshowAnimationId = requestAnimationFrame(tickSlideshow);
+}
+
+function tickSlideshow(timestamp) {
+  if (!isSlideshowActive) {
+    resetSlideshowUI();
+    return;
+  }
+
+  if (isSlideshowPaused) {
+    slideshowLastTimestamp = null;
+    slideshowAnimationId = requestAnimationFrame(tickSlideshow);
+    return;
+  }
+
+  if (!slideshowLastTimestamp) {
+    slideshowLastTimestamp = timestamp;
+  }
+
+  const elapsed = timestamp - slideshowLastTimestamp;
+  slideshowLastTimestamp = timestamp;
+
+  slideshowProgress += (elapsed / slideshowDurationMs) * 100;
+
+  if (slideshowProgress >= 100) {
+    slideshowProgress = 0;
+    showNextImage();
+  }
+
+  const progressBar = document.getElementById('lightbox-progress-bar');
+  if (progressBar) {
+    progressBar.style.width = `${Math.min(100, slideshowProgress)}%`;
+  }
+
+  slideshowAnimationId = requestAnimationFrame(tickSlideshow);
+}
+
+function stopSlideshow() {
+  isSlideshowActive = false;
+  isSlideshowPaused = false;
+  slideshowProgress = 0;
+  if (slideshowAnimationId) {
+    cancelAnimationFrame(slideshowAnimationId);
+    slideshowAnimationId = null;
+  }
+  resetSlideshowUI();
+}
+
+function resetSlideshowUI() {
+  const controls = document.getElementById('lightbox-slideshow-controls');
+  const container = document.getElementById('lightbox-progress-container');
+  const progressBar = document.getElementById('lightbox-progress-bar');
+  
+  if (controls) controls.classList.add('hidden');
+  if (container) container.classList.add('hidden');
+  if (progressBar) progressBar.style.width = '0%';
+}
+
+function updateLightboxPlayPauseIcon() {
+  const playIcon = document.getElementById('play-icon');
+  const pauseIcon = document.getElementById('pause-icon');
+  if (!playIcon || !pauseIcon) return;
+
+  if (isSlideshowPaused) {
+    playIcon.classList.remove('hidden');
+    pauseIcon.classList.add('hidden');
+  } else {
+    playIcon.classList.add('hidden');
+    pauseIcon.classList.remove('hidden');
+  }
 }
 
 function loadLightboxImage() {
@@ -1417,11 +1550,19 @@ lightboxImg.addEventListener('click', (e) => {
 lightboxNextBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   showNextImage();
+  if (isSlideshowActive) {
+    slideshowProgress = 0;
+    slideshowLastTimestamp = null;
+  }
 });
 
 lightboxPrevBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   showPrevImage();
+  if (isSlideshowActive) {
+    slideshowProgress = 0;
+    slideshowLastTimestamp = null;
+  }
 });
 
 // Keyboard Navigation
@@ -1432,8 +1573,22 @@ window.addEventListener('keydown', (e) => {
     closeLightbox();
   } else if (e.key === 'ArrowRight') {
     showNextImage();
+    if (isSlideshowActive) {
+      slideshowProgress = 0;
+      slideshowLastTimestamp = null;
+    }
   } else if (e.key === 'ArrowLeft') {
     showPrevImage();
+    if (isSlideshowActive) {
+      slideshowProgress = 0;
+      slideshowLastTimestamp = null;
+    }
+  } else if (e.key === ' ' || e.code === 'Space') {
+    if (isSlideshowActive) {
+      e.preventDefault();
+      isSlideshowPaused = !isSlideshowPaused;
+      updateLightboxPlayPauseIcon();
+    }
   }
 });
 
@@ -1903,9 +2058,31 @@ function initLegalModals() {
   });
 }
 
+function initSlideshowControls() {
+  const lbPlayPauseBtn = document.getElementById('lightbox-play-pause-btn');
+  const lbDelaySelect = document.getElementById('lightbox-slideshow-delay');
+
+  if (lbPlayPauseBtn) {
+    lbPlayPauseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      isSlideshowPaused = !isSlideshowPaused;
+      updateLightboxPlayPauseIcon();
+    });
+  }
+
+  if (lbDelaySelect) {
+    lbDelaySelect.addEventListener('click', (e) => e.stopPropagation());
+    lbDelaySelect.addEventListener('change', (e) => {
+      const val = parseInt(e.target.value) || 3;
+      slideshowDurationMs = val * 1000;
+    });
+  }
+}
+
 // Start application
 initFallingLeaves();
 initLoginPasswordHelpers();
 initLegalModals();
 initWhitelist();
+initSlideshowControls();
 checkAuth();

@@ -11,7 +11,12 @@ const security = require('./security');
 
 const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
+const MAX_UPLOAD_FILE_SIZE = Number(process.env.MAX_UPLOAD_FILE_SIZE || 250 * 1024 * 1024);
+const MAX_UPLOAD_FILES = Number(process.env.MAX_UPLOAD_FILES || 100);
+const MAX_ZIP_ENTRIES = Number(process.env.MAX_ZIP_ENTRIES || 500);
+const MAX_ZIP_TOTAL_SIZE = Number(process.env.MAX_ZIP_TOTAL_SIZE || 750 * 1024 * 1024);
 
 // Setup directories
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
@@ -31,7 +36,18 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: MAX_UPLOAD_FILE_SIZE,
+    files: MAX_UPLOAD_FILES,
+    parts: MAX_UPLOAD_FILES + 5
+  },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, ext === '.zip' || ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext));
+  }
+});
 
 // Middlewares
 app.use(express.json());
@@ -50,7 +66,7 @@ app.use((req, res, next) => {
 });
 
 app.use(session({
-  secret: 'bildsharing-session-secret-98765-secure',
+  secret: db.sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -100,8 +116,7 @@ app.post('/api/auth/login', security.securityLimiter, (req, res) => {
     return res.status(401).json({ error: 'Ungültiger Benutzername oder Passwort.' });
   }
 
-  const hashedPassword = db.hashPassword(password);
-  if (user.password !== hashedPassword) {
+  if (!db.verifyPassword(password, user.password)) {
     security.recordFailedAttempt(ip, username);
     return res.status(401).json({ error: 'Ungültiger Benutzername oder Passwort.' });
   }
@@ -325,7 +340,14 @@ app.put('/api/sessions/:id', requireAuth, (req, res) => {
 });
 
 // Upload images / ZIP files
-app.post('/api/sessions/upload', requireAuth, upload.array('files'), (req, res) => {
+function blockDemoUploads(req, res, next) {
+  if (req.session.user.username.toLowerCase() === 'demo') {
+    return res.status(403).json({ error: 'Der Demozugang darf keine Dateien hochladen.' });
+  }
+  next();
+}
+
+app.post('/api/sessions/upload', requireAuth, blockDemoUploads, upload.array('files'), (req, res) => {
   const { title } = req.body;
   const files = req.files;
 
@@ -378,42 +400,57 @@ app.post('/api/sessions/upload', requireAuth, upload.array('files'), (req, res) 
         // Handle ZIP extraction
         const zip = new AdmZip(file.path);
         const zipEntries = zip.getEntries();
+        if (zipEntries.length > MAX_ZIP_ENTRIES) {
+          throw new Error(`ZIP enthÃ¤lt zu viele EintrÃ¤ge (maximal ${MAX_ZIP_ENTRIES}).`);
+        }
+        let totalZipSize = 0;
         
         for (const entry of zipEntries) {
           if (!entry.isDirectory) {
             // Only extract image formats
             const isImage = /\.(jpe?g|png|gif|webp|bmp)$/i.test(entry.entryName);
             if (isImage) {
-              const basename = path.basename(entry.entryName);
-              // Extract file flatly to the session directory
-              zip.extractEntryTo(entry, sessionDir, false, true);
-              
-              // Read size of extracted file
+              const entrySize = entry.header && entry.header.size ? entry.header.size : 0;
+              totalZipSize += entrySize;
+              if (entrySize > MAX_UPLOAD_FILE_SIZE || totalZipSize > MAX_ZIP_TOTAL_SIZE) {
+                throw new Error('ZIP ist zu groÃŸ oder enthÃ¤lt zu groÃŸe Dateien.');
+              }
+
+              const fileBuffer = entry.getData();
+              const detectedMime = detectImageMime(fileBuffer);
+              if (!isAllowedImageBuffer(fileBuffer, entry.entryName)) {
+                continue;
+              }
+
+              const basename = createSafeStoredFilename(entry.entryName);
               const extractedPath = path.join(sessionDir, basename);
+              fs.writeFileSync(extractedPath, fileBuffer, { flag: 'wx' });
               const stats = fs.statSync(extractedPath);
               
               processedFiles.push({
                 filename: basename,
                 size: stats.size,
-                mimetype: getMimeTypeByExtension(basename)
+                mimetype: detectedMime || getMimeTypeByExtension(basename)
               });
             }
           }
         }
       } else {
         // Handle normal image
-        const isImage = file.mimetype.startsWith('image/') || 
-                        /\.(jpe?g|png|gif|webp|bmp)$/i.test(file.originalname);
+        const fileBuffer = fs.readFileSync(file.path);
+        const detectedMime = detectImageMime(fileBuffer);
+        const isImage = isAllowedImageBuffer(fileBuffer, file.originalname);
         
         if (isImage) {
-          const destPath = path.join(sessionDir, file.originalname);
+          const safeFilename = createSafeStoredFilename(file.originalname);
+          const destPath = path.join(sessionDir, safeFilename);
           // Move file from temp to session directory
           fs.renameSync(file.path, destPath);
           
           processedFiles.push({
-            filename: file.originalname,
+            filename: safeFilename,
             size: file.size,
-            mimetype: file.mimetype
+            mimetype: detectedMime || getMimeTypeByExtension(safeFilename)
           });
         }
       }
@@ -657,9 +694,50 @@ function getMimeTypeByExtension(filename) {
   }
 }
 
+function createSafeStoredFilename(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  const base = path.basename(filename, ext)
+    .normalize('NFKD')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 80) || 'image';
+  return `${crypto.randomUUID()}-${base}${ext}`;
+}
+
+function isAllowedImageBuffer(buffer, filename) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
+  const ext = path.extname(filename).toLowerCase();
+  if (!['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext)) return false;
+
+  return Boolean(detectImageMime(buffer));
+}
+
+function detectImageMime(buffer) {
+  const header = buffer.subarray(0, 12);
+  const hex = header.toString('hex');
+  if (hex.startsWith('ffd8ff')) return 'image/jpeg';
+  if (hex.startsWith('89504e470d0a1a0a')) return 'image/png';
+  const gifHeader = buffer.subarray(0, 6).toString('ascii');
+  if (gifHeader === 'GIF87a' || gifHeader === 'GIF89a') return 'image/gif';
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp';
+  }
+  if (buffer.subarray(0, 2).toString('ascii') === 'BM') return 'image/bmp';
+  return null;
+}
+
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Express global error handler:', err);
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Eine Datei ist zu groÃŸ.' });
+    }
+    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_PART_COUNT') {
+      return res.status(413).json({ error: 'Zu viele Dateien im Upload.' });
+    }
+  }
   res.status(500).json({ error: 'Ein interner Serverfehler ist aufgetreten.' });
 });
 
