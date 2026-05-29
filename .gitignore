@@ -1,0 +1,6 @@
+node_modules/
+uploads/
+data/
+meditation.tnickel-ki.conf
+deploy.ps1
+deploy.sh
