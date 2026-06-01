@@ -373,6 +373,34 @@ module.exports = {
     return newSession;
   },
 
+  addFilesToSession(id, files, username) {
+    const db = readDb();
+    const index = db.sessions.findIndex(s => s.id === id);
+    if (index === -1) {
+      throw new Error('Session nicht gefunden.');
+    }
+
+    const session = db.sessions[index];
+    const currentUser = db.users.find(u => u.username.toLowerCase() === username.toLowerCase());
+
+    if (!currentUser) {
+      throw new Error('Nicht autorisiert.');
+    }
+
+    // Only owner or admin can append files
+    if (currentUser.role !== 'admin' && session.uploadedBy.toLowerCase() !== username.toLowerCase()) {
+      throw new Error('Keine Berechtigung zum Bearbeiten dieser Galerie.');
+    }
+
+    if (!session.files) {
+      session.files = [];
+    }
+
+    session.files.push(...files);
+    writeDb(db);
+    return session;
+  },
+
   deleteSession(id, username) {
     const db = readDb();
     const index = db.sessions.findIndex(s => s.id === id);

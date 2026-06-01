@@ -336,7 +336,7 @@ input[type="password"]:focus,
 /* --- APP CONTAINER --- */
 .app-container {
   width: 100%;
-  max-width: 1400px;
+  max-width: 1600px;
   padding: 20px;
   min-height: 100vh;
   display: flex;
@@ -520,7 +520,7 @@ input[type="password"]:focus,
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 420px 1fr;
+  grid-template-columns: 380px 1fr;
   gap: 24px;
   align-items: start;
 }
@@ -931,6 +931,7 @@ input[type="password"]:focus,
   gap: 12px;
   /* Prevent clicks on actions from expanding the accordion */
   pointer-events: auto;
+  flex-shrink: 0;
 }
 
 .session-folder-icon {
@@ -962,6 +963,7 @@ input[type="password"]:focus,
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
+  flex-shrink: 0;
 }
 
 .toggle-text {
@@ -970,6 +972,7 @@ input[type="password"]:focus,
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-family: var(--font-family);
+  white-space: nowrap;
 }
 
 .session-toggle-btn .toggle-text-hide {
@@ -2387,5 +2390,24 @@ input[type="password"]:focus,
 .slideshow-delay-select option {
   background-color: var(--bg-dark);
   color: var(--text-primary);
+}
+
+video.lightbox-image {
+  cursor: default;
+}
+
+.video-badge {
+  pointer-events: none;
+  font-family: var(--font-family);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.img-thumb-container:hover .video-badge {
+  opacity: 0;
+  transform: translateY(2px) scale(0.95);
 }
 

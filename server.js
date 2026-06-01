@@ -45,7 +45,7 @@ const upload = multer({
   },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, ext === '.zip' || ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext));
+    cb(null, ext === '.zip' || ext === '.mp4' || ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext));
   }
 });
 
@@ -401,57 +401,89 @@ app.post('/api/sessions/upload', requireAuth, blockDemoUploads, upload.array('fi
         const zip = new AdmZip(file.path);
         const zipEntries = zip.getEntries();
         if (zipEntries.length > MAX_ZIP_ENTRIES) {
-          throw new Error(`ZIP enthÃ¤lt zu viele EintrÃ¤ge (maximal ${MAX_ZIP_ENTRIES}).`);
+          throw new Error(`ZIP enthält zu viele Einträge (maximal ${MAX_ZIP_ENTRIES}).`);
         }
         let totalZipSize = 0;
         
         for (const entry of zipEntries) {
           if (!entry.isDirectory) {
-            // Only extract image formats
             const isImage = /\.(jpe?g|png|gif|webp|bmp)$/i.test(entry.entryName);
-            if (isImage) {
+            const isVideo = /\.mp4$/i.test(entry.entryName);
+            if (isImage || isVideo) {
               const entrySize = entry.header && entry.header.size ? entry.header.size : 0;
               totalZipSize += entrySize;
               if (entrySize > MAX_UPLOAD_FILE_SIZE || totalZipSize > MAX_ZIP_TOTAL_SIZE) {
-                throw new Error('ZIP ist zu groÃŸ oder enthÃ¤lt zu groÃŸe Dateien.');
+                throw new Error('ZIP ist zu groß oder enthält zu große Dateien.');
               }
 
               const fileBuffer = entry.getData();
-              const detectedMime = detectImageMime(fileBuffer);
-              if (!isAllowedImageBuffer(fileBuffer, entry.entryName)) {
-                continue;
-              }
+              if (isImage) {
+                const detectedMime = detectImageMime(fileBuffer);
+                if (!isAllowedImageBuffer(fileBuffer, entry.entryName)) {
+                  continue;
+                }
 
-              const basename = createSafeStoredFilename(entry.entryName);
-              const extractedPath = path.join(sessionDir, basename);
-              fs.writeFileSync(extractedPath, fileBuffer, { flag: 'wx' });
-              const stats = fs.statSync(extractedPath);
-              
-              processedFiles.push({
-                filename: basename,
-                size: stats.size,
-                mimetype: detectedMime || getMimeTypeByExtension(basename)
-              });
+                const basename = createSafeStoredFilename(entry.entryName);
+                const extractedPath = path.join(sessionDir, basename);
+                fs.writeFileSync(extractedPath, fileBuffer, { flag: 'wx' });
+                const stats = fs.statSync(extractedPath);
+                
+                processedFiles.push({
+                  filename: basename,
+                  size: stats.size,
+                  mimetype: detectedMime || getMimeTypeByExtension(basename)
+                });
+              } else if (isVideo) {
+                const detectedMime = detectVideoMime(fileBuffer);
+                if (!isAllowedVideoBuffer(fileBuffer, entry.entryName)) {
+                  continue;
+                }
+
+                const basename = createSafeStoredFilename(entry.entryName);
+                const extractedPath = path.join(sessionDir, basename);
+                fs.writeFileSync(extractedPath, fileBuffer, { flag: 'wx' });
+                const stats = fs.statSync(extractedPath);
+                
+                processedFiles.push({
+                  filename: basename,
+                  size: stats.size,
+                  mimetype: detectedMime || 'video/mp4'
+                });
+              }
             }
           }
         }
       } else {
-        // Handle normal image
+        // Handle normal image or video
         const fileBuffer = fs.readFileSync(file.path);
-        const detectedMime = detectImageMime(fileBuffer);
-        const isImage = isAllowedImageBuffer(fileBuffer, file.originalname);
+        const ext = path.extname(file.originalname).toLowerCase();
         
-        if (isImage) {
-          const safeFilename = createSafeStoredFilename(file.originalname);
-          const destPath = path.join(sessionDir, safeFilename);
-          // Move file from temp to session directory
-          fs.renameSync(file.path, destPath);
-          
-          processedFiles.push({
-            filename: safeFilename,
-            size: file.size,
-            mimetype: detectedMime || getMimeTypeByExtension(safeFilename)
-          });
+        if (ext === '.mp4') {
+          const detectedMime = detectVideoMime(fileBuffer);
+          if (isAllowedVideoBuffer(fileBuffer, file.originalname)) {
+            const safeFilename = createSafeStoredFilename(file.originalname);
+            const destPath = path.join(sessionDir, safeFilename);
+            fs.renameSync(file.path, destPath);
+            
+            processedFiles.push({
+              filename: safeFilename,
+              size: file.size,
+              mimetype: detectedMime || 'video/mp4'
+            });
+          }
+        } else {
+          const detectedMime = detectImageMime(fileBuffer);
+          if (isAllowedImageBuffer(fileBuffer, file.originalname)) {
+            const safeFilename = createSafeStoredFilename(file.originalname);
+            const destPath = path.join(sessionDir, safeFilename);
+            fs.renameSync(file.path, destPath);
+            
+            processedFiles.push({
+              filename: safeFilename,
+              size: file.size,
+              mimetype: detectedMime || getMimeTypeByExtension(safeFilename)
+            });
+          }
         }
       }
 
@@ -480,6 +512,159 @@ app.post('/api/sessions/upload', requireAuth, blockDemoUploads, upload.array('fi
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true, force: true });
     }
+    // Cleanup any remaining uploaded temp files
+    for (const file of files) {
+      if (fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch (e) {}
+      }
+    }
+    res.status(500).json({ error: 'Fehler bei der Upload-Verarbeitung: ' + err.message });
+  }
+});
+
+app.post('/api/sessions/:id/upload', requireAuth, blockDemoUploads, upload.array('files'), (req, res) => {
+  const sessionId = req.params.id;
+  const files = req.files;
+
+  if (!files || files.length === 0) {
+    return res.status(400).json({ error: 'Keine Dateien hochgeladen.' });
+  }
+
+  // Get session from DB and check permissions
+  const userSessions = db.getSessionsForUser(req.session.user.username);
+  const session = userSessions.find(s => s.id === sessionId);
+
+  if (!session) {
+    // Cleanup temp files
+    files.forEach(file => {
+      if (fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch (e) {}
+      }
+    });
+    return res.status(403).json({ error: 'Keine Berechtigung zum Bearbeiten dieser Galerie.' });
+  }
+
+  const sessionDir = path.join(UPLOADS_DIR, sessionId);
+  if (!fs.existsSync(sessionDir)) {
+    fs.mkdirSync(sessionDir, { recursive: true });
+  }
+
+  const processedFiles = [];
+
+  try {
+    for (const file of files) {
+      const isZip = file.mimetype === 'application/zip' || 
+                    file.mimetype === 'application/x-zip-compressed' || 
+                    path.extname(file.originalname).toLowerCase() === '.zip';
+
+      if (isZip) {
+        // Handle ZIP extraction
+        const zip = new AdmZip(file.path);
+        const zipEntries = zip.getEntries();
+        if (zipEntries.length > MAX_ZIP_ENTRIES) {
+          throw new Error(`ZIP enthält zu viele Einträge (maximal ${MAX_ZIP_ENTRIES}).`);
+        }
+        let totalZipSize = 0;
+        
+        for (const entry of zipEntries) {
+          if (!entry.isDirectory) {
+            const isImage = /\.(jpe?g|png|gif|webp|bmp)$/i.test(entry.entryName);
+            const isVideo = /\.mp4$/i.test(entry.entryName);
+            if (isImage || isVideo) {
+              const entrySize = entry.header && entry.header.size ? entry.header.size : 0;
+              totalZipSize += entrySize;
+              if (entrySize > MAX_UPLOAD_FILE_SIZE || totalZipSize > MAX_ZIP_TOTAL_SIZE) {
+                throw new Error('ZIP ist zu groß oder enthält zu große Dateien.');
+              }
+
+              const fileBuffer = entry.getData();
+              if (isImage) {
+                const detectedMime = detectImageMime(fileBuffer);
+                if (!isAllowedImageBuffer(fileBuffer, entry.entryName)) {
+                  continue;
+                }
+
+                const basename = createSafeStoredFilename(entry.entryName);
+                const extractedPath = path.join(sessionDir, basename);
+                fs.writeFileSync(extractedPath, fileBuffer, { flag: 'wx' });
+                const stats = fs.statSync(extractedPath);
+                
+                processedFiles.push({
+                  filename: basename,
+                  size: stats.size,
+                  mimetype: detectedMime || getMimeTypeByExtension(basename)
+                });
+              } else if (isVideo) {
+                const detectedMime = detectVideoMime(fileBuffer);
+                if (!isAllowedVideoBuffer(fileBuffer, entry.entryName)) {
+                  continue;
+                }
+
+                const basename = createSafeStoredFilename(entry.entryName);
+                const extractedPath = path.join(sessionDir, basename);
+                fs.writeFileSync(extractedPath, fileBuffer, { flag: 'wx' });
+                const stats = fs.statSync(extractedPath);
+                
+                processedFiles.push({
+                  filename: basename,
+                  size: stats.size,
+                  mimetype: detectedMime || 'video/mp4'
+                });
+              }
+            }
+          }
+        }
+      } else {
+        // Handle normal image or video
+        const fileBuffer = fs.readFileSync(file.path);
+        const ext = path.extname(file.originalname).toLowerCase();
+        
+        if (ext === '.mp4') {
+          const detectedMime = detectVideoMime(fileBuffer);
+          if (isAllowedVideoBuffer(fileBuffer, file.originalname)) {
+            const safeFilename = createSafeStoredFilename(file.originalname);
+            const destPath = path.join(sessionDir, safeFilename);
+            fs.renameSync(file.path, destPath);
+            
+            processedFiles.push({
+              filename: safeFilename,
+              size: file.size,
+              mimetype: detectedMime || 'video/mp4'
+            });
+          }
+        } else {
+          const detectedMime = detectImageMime(fileBuffer);
+          if (isAllowedImageBuffer(fileBuffer, file.originalname)) {
+            const safeFilename = createSafeStoredFilename(file.originalname);
+            const destPath = path.join(sessionDir, safeFilename);
+            fs.renameSync(file.path, destPath);
+            
+            processedFiles.push({
+              filename: safeFilename,
+              size: file.size,
+              mimetype: detectedMime || getMimeTypeByExtension(safeFilename)
+            });
+          }
+        }
+      }
+
+      // Cleanup temp file if it still exists
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+    }
+
+    // Check if we actually saved any files
+    if (processedFiles.length === 0) {
+      return res.status(400).json({ error: 'Keine gültigen Bilder/Videos im Upload oder ZIP gefunden.' });
+    }
+
+    // Append files to session in DB
+    const updatedSession = db.addFilesToSession(sessionId, processedFiles, req.session.user.username);
+    res.status(200).json({ success: true, session: updatedSession });
+
+  } catch (err) {
+    console.error('Upload processing error:', err);
     // Cleanup any remaining uploaded temp files
     for (const file of files) {
       if (fs.existsSync(file.path)) {
@@ -687,11 +872,28 @@ function getMimeTypeByExtension(filename) {
     case '.gif': return 'image/gif';
     case '.webp': return 'image/webp';
     case '.bmp': return 'image/bmp';
+    case '.mp4': return 'video/mp4';
     case '.jpg':
     case '.jpeg':
     default:
       return 'image/jpeg';
   }
+}
+
+function isAllowedVideoBuffer(buffer, filename) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 8) return false;
+  const ext = path.extname(filename).toLowerCase();
+  if (ext !== '.mp4') return false;
+  return detectVideoMime(buffer) === 'video/mp4';
+}
+
+function detectVideoMime(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 8) return null;
+  const ftyp = buffer.subarray(4, 8).toString('ascii');
+  if (ftyp === 'ftyp') {
+    return 'video/mp4';
+  }
+  return null;
 }
 
 function createSafeStoredFilename(filename) {

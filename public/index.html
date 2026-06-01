@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <!-- Main Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=1.3">
+  <link rel="stylesheet" href="css/style.css?v=1.5">
   <!-- Prevent Flash of Unstyled Content (FOUC) for hidden elements before CSS loads -->
   <style>
     .hidden { display: none !important; }
@@ -141,7 +141,7 @@
 
             <!-- Drag & Drop Zone -->
             <div id="dropzone" class="dropzone">
-              <input type="file" id="file-input" name="files" multiple accept="image/*,.zip" class="hidden-file-input">
+              <input type="file" id="file-input" name="files" multiple accept="image/*,video/mp4,.zip" class="hidden-file-input">
               <div class="dropzone-content">
                 <div class="upload-icon">
                   <!-- Custom Natural Leaf SVG Icon inside dropzone -->
@@ -149,7 +149,7 @@
                 </div>
                 <h3>Bilder per Drag & Drop hier ablegen</h3>
                 <p>oder <span>hier klicken</span> zum Auswählen</p>
-                <span class="file-type-hint">Unterstützte Formate: JPG, PNG, GIF, WEBP, ZIP (Bilderarchiv)</span>
+                <span class="file-type-hint">Unterstützte Formate: JPG, PNG, GIF, WEBP, MP4, ZIP (Medienarchiv)</span>
               </div>
             </div>
 
@@ -481,6 +481,7 @@
       <button class="lightbox-btn lightbox-next" id="lightbox-next-btn" title="Nächstes Bild (Pfeiltaste rechts)">&#10095;</button>
       <div class="lightbox-content-wrapper">
         <img id="lightbox-img" src="" alt="Großansicht" class="lightbox-image">
+        <video id="lightbox-video" src="" controls class="lightbox-image hidden" style="max-height: 80vh; max-width: 90vw;"></video>
         <div class="lightbox-caption-row" style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 15px; width: 100%;">
           <div id="lightbox-caption" class="lightbox-caption" style="margin-top: 0; max-width: 350px;"></div>
           <button id="lightbox-delete-btn" class="btn btn-danger btn-sm hidden" title="Bild unwiderruflich löschen" style="margin: 0; padding: 6px 12px; display: flex; align-items: center; gap: 4px;">
@@ -506,6 +507,6 @@
     </div>
 
     <!-- Main Application Script -->
-    <script src="js/app.js?v=1.3"></script>
+    <script src="js/app.js?v=1.5"></script>
 </body>
 </html>

@@ -66,11 +66,13 @@ const accessLogList = document.getElementById('access-log-list');
 // Lightbox Elements
 const lightboxModal = document.getElementById('lightbox-modal');
 const lightboxImg = document.getElementById('lightbox-img');
+const lightboxVideo = document.getElementById('lightbox-video');
 const lightboxCaption = document.getElementById('lightbox-caption');
 const lightboxCloseBtn = document.getElementById('lightbox-close-btn');
 const lightboxPrevBtn = document.getElementById('lightbox-prev-btn');
 const lightboxNextBtn = document.getElementById('lightbox-next-btn');
 const lightboxDeleteBtn = document.getElementById('lightbox-delete-btn');
+const uploadShortcutBtn = document.getElementById('upload-shortcut-btn');
 
 // Download Toast Elements
 const downloadToast = document.getElementById('download-toast');
@@ -517,6 +519,7 @@ function isDemoUser() {
 function applyDemoUploadState() {
   if (!isDemoUser()) {
     fileInput.disabled = false;
+    if (uploadShortcutBtn) uploadShortcutBtn.disabled = false;
     dropzone.classList.remove('disabled');
     uploadError.classList.add('hidden');
     return;
@@ -525,6 +528,7 @@ function applyDemoUploadState() {
   selectedFiles = [];
   updateSelectedFilesUI();
   fileInput.disabled = true;
+  if (uploadShortcutBtn) uploadShortcutBtn.disabled = true;
   dropzone.classList.add('disabled');
   uploadError.textContent = 'Der Demozugang darf keine Dateien hochladen.';
   uploadError.classList.remove('hidden');
@@ -535,6 +539,20 @@ dropzone.addEventListener('click', () => {
   if (isDemoUser()) return;
   fileInput.click();
 });
+
+if (uploadShortcutBtn) {
+  uploadShortcutBtn.addEventListener('click', () => {
+    if (isDemoUser()) {
+      alert('Der Demozugang darf keine Dateien hochladen.');
+      return;
+    }
+    const uploadPanel = document.querySelector('.upload-panel');
+    if (uploadPanel) {
+      uploadPanel.scrollIntoView({ behavior: 'smooth' });
+    }
+    fileInput.click();
+  });
+}
 
 fileInput.addEventListener('change', (e) => {
   handleFilesSelection(e.target.files);
@@ -607,12 +625,20 @@ function updateSelectedFilesUI() {
   selectedFiles.forEach((file, index) => {
     const li = document.createElement('li');
     const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(file.name);
+    const isVideo = file.type.startsWith('video/') || /\.mp4$/i.test(file.name);
     
     if (isImage) {
       const url = URL.createObjectURL(file);
       objectUrls.push(url);
       li.innerHTML = `
         <img src="${url}" class="file-preview-thumbnail" alt="${escapeHtml(file.name)}">
+        <button type="button" class="remove-file-overlay" data-index="${index}" title="Entfernen">&times;</button>
+      `;
+    } else if (isVideo) {
+      const url = URL.createObjectURL(file);
+      objectUrls.push(url);
+      li.innerHTML = `
+        <video src="${url}" class="file-preview-thumbnail" muted playsinline style="object-fit: cover;"></video>
         <button type="button" class="remove-file-overlay" data-index="${index}" title="Entfernen">&times;</button>
       `;
     } else {
@@ -850,6 +876,85 @@ async function loadSessions() {
   }
 }
 
+async function uploadFilesToExistingSession(sessionId, files, cardElement) {
+  uploadProgressWrapper.classList.remove('hidden');
+  uploadProgressBar.style.width = '0%';
+  progressPercent.textContent = '0%';
+  progressText.textContent = 'Dateien werden in die Galerie hochgeladen...';
+
+  const formData = new FormData();
+  Array.from(files).forEach(file => {
+    formData.append('files', file);
+  });
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/sessions/${sessionId}/upload`, true);
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const percentComplete = Math.round((e.loaded / e.total) * 100);
+        uploadProgressBar.style.width = percentComplete + '%';
+        progressPercent.textContent = percentComplete + '%';
+        if (percentComplete < 100) {
+          progressText.textContent = 'Dateien werden hochgeladen...';
+        } else {
+          progressText.textContent = 'Verarbeite Dateien auf dem Server...';
+        }
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      uploadProgressWrapper.classList.add('hidden');
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+           const res = JSON.parse(xhr.responseText);
+           if (res.success) {
+             const sessionIdx = allSessions.findIndex(s => s.id === sessionId);
+             if (sessionIdx !== -1) {
+               allSessions[sessionIdx] = res.session;
+             }
+             cardElement.classList.add('expanded');
+             renderGalleryImages(cardElement, res.session);
+             
+             const fileCount = res.session.files.length;
+             const totalSize = res.session.files.reduce((acc, f) => acc + (f.size || 0), 0);
+             const formattedSize = formatBytes(totalSize);
+             const metaItem = cardElement.querySelector('.session-meta-item.file-count-meta span');
+             if (metaItem) {
+               metaItem.textContent = `${fileCount} ${fileCount === 1 ? 'Medien' : 'Medien'} (${formattedSize})`;
+             }
+             alert('Dateien erfolgreich zur Galerie hinzugefügt!');
+             resolve();
+           } else {
+             alert(res.error || 'Fehler beim Upload.');
+             reject();
+           }
+        } catch (err) {
+           alert('Fehler beim Verarbeiten der Serverantwort.');
+           reject();
+        }
+      } else {
+        let errorMsg = 'Fehler beim Upload.';
+        try {
+          const response = JSON.parse(xhr.responseText);
+          errorMsg = response.error || errorMsg;
+        } catch (e) {}
+        alert(errorMsg);
+        reject();
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      uploadProgressWrapper.classList.add('hidden');
+      alert('Netzwerkfehler beim Upload.');
+      reject();
+    });
+
+    xhr.send(formData);
+  });
+}
+
 function createSessionCard(session) {
   const card = document.createElement('div');
   card.className = 'session-card';
@@ -931,6 +1036,10 @@ function createSessionCard(session) {
         </button>
         
         ${showDelete ? `
+          <button class="btn btn-primary btn-sm upload-to-session-btn" title="Bilder/Videos zu dieser Galerie hinzufügen" style="margin-right: 6px;">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px; margin-right: 4px; vertical-align: middle;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+            <span>Hochladen</span>
+          </button>
           <button class="btn btn-danger btn-sm delete-session-btn" title="Session unwiderruflich löschen">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px; height:16px;"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
           </button>
@@ -1117,6 +1226,40 @@ function createSessionCard(session) {
     );
   });
 
+  // Action: Upload to session
+  if (showDelete) {
+    const uploadToSessionBtn = card.querySelector('.upload-to-session-btn');
+    if (uploadToSessionBtn) {
+      uploadToSessionBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isDemoUser()) {
+          alert('Der Demozugang darf keine Dateien hochladen.');
+          return;
+        }
+
+        const fileInputDummy = document.createElement('input');
+        fileInputDummy.type = 'file';
+        fileInputDummy.multiple = true;
+        fileInputDummy.accept = 'image/*,video/mp4,.zip';
+        fileInputDummy.style.display = 'none';
+        document.body.appendChild(fileInputDummy);
+
+        fileInputDummy.addEventListener('change', async () => {
+          const files = fileInputDummy.files;
+          if (files.length === 0) {
+            fileInputDummy.remove();
+            return;
+          }
+          
+          await uploadFilesToExistingSession(session.id, files, card);
+          fileInputDummy.remove();
+        });
+        
+        fileInputDummy.click();
+      });
+    }
+  }
+
   // Action: Delete Session (Double safety confirmation)
   if (showDelete) {
     card.querySelector('.delete-session-btn').addEventListener('click', async (e) => {
@@ -1167,27 +1310,37 @@ function renderGalleryImages(cardElement, session) {
     title: f.filename,
     sessionId: session.id,
     filename: f.filename,
+    mimetype: f.mimetype,
     showDelete: showDelete
   }));
 
   session.files.forEach((file, index) => {
-    const imgUrl = `/uploads/${session.id}/${encodeURIComponent(file.filename)}`;
+    const mediaUrl = `/uploads/${session.id}/${encodeURIComponent(file.filename)}`;
+    const isVideo = file.mimetype === 'video/mp4' || /\.mp4$/i.test(file.filename);
     
     const thumbContainer = document.createElement('div');
     thumbContainer.className = 'img-thumb-container';
     thumbContainer.title = `${escapeHtml(file.filename)} (${formatBytes(file.size)})`;
 
+    const mediaHtml = isVideo 
+      ? `<video src="${mediaUrl}" class="img-thumb" muted playsinline style="object-fit: cover;"></video>
+         <div class="video-badge" style="position: absolute; bottom: 8px; right: 8px; background: rgba(0, 0, 0, 0.6); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px; display: flex; align-items: center; gap: 4px; pointer-events: none; border: 1px solid rgba(255, 255, 255, 0.2); z-index: 2;">
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="12" height="12" style="fill: #fff;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+           <span>Video</span>
+         </div>`
+      : `<img src="${mediaUrl}" class="img-thumb" alt="${escapeHtml(file.filename)}" loading="lazy">`;
+
     thumbContainer.innerHTML = `
       <div class="thumb-checkbox-container">
         <input type="checkbox" class="thumb-checkbox" data-filename="${escapeHtml(file.filename)}">
       </div>
-      <img src="${imgUrl}" class="img-thumb" alt="${escapeHtml(file.filename)}" loading="lazy">
+      ${mediaHtml}
       <div class="thumb-overlay">
-        <a href="${imgUrl}" download="${escapeHtml(file.filename)}" class="thumb-download-btn" title="Bild herunterladen">
+        <a href="${mediaUrl}" download="${escapeHtml(file.filename)}" class="thumb-download-btn" title="Datei herunterladen">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
         </a>
         ${showDelete ? `
-          <button class="thumb-delete-btn" title="Bild löschen">
+          <button class="thumb-delete-btn" title="Datei löschen">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
           </button>
         ` : ''}
@@ -1305,6 +1458,10 @@ function closeLightbox() {
   
   lightboxImg.src = '';
   lightboxImg.classList.remove('zoomed');
+  if (lightboxVideo) {
+    lightboxVideo.pause();
+    lightboxVideo.src = '';
+  }
 
   stopSlideshow();
 }
@@ -1319,6 +1476,7 @@ function startSlideshow(session, delaySeconds) {
     title: f.filename,
     sessionId: session.id,
     filename: f.filename,
+    mimetype: f.mimetype,
     showDelete: showDelete
   }));
 
@@ -1424,13 +1582,35 @@ function loadLightboxImage() {
   if (lightboxCurrentIndex < 0 || lightboxCurrentIndex >= lightboxImagesList.length) return;
   
   const imgData = lightboxImagesList[lightboxCurrentIndex];
+  const isVideo = imgData.mimetype === 'video/mp4' || imgData.url.toLowerCase().endsWith('.mp4') || (imgData.filename && imgData.filename.toLowerCase().endsWith('.mp4'));
   
   // Fade effect
   lightboxImg.style.opacity = '0';
+  if (lightboxVideo) {
+    lightboxVideo.style.opacity = '0';
+    lightboxVideo.pause();
+    lightboxVideo.src = '';
+  }
   lightboxImg.classList.remove('zoomed');
   
   setTimeout(() => {
-    lightboxImg.src = imgData.url;
+    if (isVideo) {
+      lightboxImg.classList.add('hidden');
+      if (lightboxVideo) {
+        lightboxVideo.classList.remove('hidden');
+        lightboxVideo.src = imgData.url;
+        lightboxVideo.load();
+        lightboxVideo.style.opacity = '1';
+      }
+    } else {
+      if (lightboxVideo) {
+        lightboxVideo.classList.add('hidden');
+      }
+      lightboxImg.classList.remove('hidden');
+      lightboxImg.src = imgData.url;
+      lightboxImg.style.opacity = '1';
+    }
+    
     lightboxCaption.textContent = `${lightboxCurrentIndex + 1} / ${lightboxImagesList.length} - ${imgData.title}`;
     
     // Toggle delete button visibility based on auth
@@ -1439,8 +1619,6 @@ function loadLightboxImage() {
     } else {
       lightboxDeleteBtn.classList.add('hidden');
     }
-    
-    lightboxImg.style.opacity = '1';
   }, 150);
 }
 
